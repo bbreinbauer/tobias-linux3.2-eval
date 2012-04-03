@@ -1,0 +1,6 @@
+0001-omap_hsmmc-make-default-dto-value-14.patch -p1
+0001-musb-update-PIO-mode-help-information-in-Kconfig.patch -p1
+0001-am335x_evm_defconfig-turn-off-MUSB-DMA.patch -p1
+0001-mach-omap2-pm33xx-Disable-VT-switch.patch -p1
+0001-am335x-evm-add-wlan-suspend-resume-support.patch -p1
+0001-am335x-evm-enable-bluetooth-suspend-resume-functiona.patch -p1

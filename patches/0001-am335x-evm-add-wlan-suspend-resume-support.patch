@@ -1,0 +1,97 @@
+From 3d3cbd4734c6964e473b2afc1d643c1c3717e744 Mon Sep 17 00:00:00 2001
+From: Eyal Reizer <eyalr@ti.com>
+Date: Thu, 22 Mar 2012 14:58:04 +0200
+Subject: [PATCH] am335x-evm: add wlan suspend-resume support
+
+* save the context of the sdio bus pads before suspend and
+  restore it during resume
+* configure the wlan_enable pin to output mode on every resume as its
+  configuration is lost during suspend
+
+Signed-off-by: Eyal Reizer <eyalr@ti.com>
+---
+ arch/arm/mach-omap2/board-am335xevm.c |    7 +++----
+ arch/arm/mach-omap2/pm33xx.c          |   14 ++++++++++++++
+ arch/arm/mach-omap2/pm33xx.h          |    7 +++++++
+ 3 files changed, 24 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-omap2/board-am335xevm.c b/arch/arm/mach-omap2/board-am335xevm.c
+index 2645cdf..23a7dff 100644
+--- a/arch/arm/mach-omap2/board-am335xevm.c
++++ b/arch/arm/mach-omap2/board-am335xevm.c
+@@ -1474,8 +1474,7 @@ static void mmc2_wl12xx_init(int evm_id, int profile)
+
+	am335x_mmc[1].mmc = 3;
+	am335x_mmc[1].name = "wl1271";
+-	am335x_mmc[1].caps = MMC_CAP_4_BIT_DATA | MMC_CAP_POWER_OFF_CARD
+-				| MMC_PM_KEEP_POWER;
++	am335x_mmc[1].caps = MMC_CAP_4_BIT_DATA | MMC_CAP_POWER_OFF_CARD;
+	am335x_mmc[1].nonremovable = true;
+	am335x_mmc[1].gpio_cd = -EINVAL;
+	am335x_mmc[1].gpio_wp = -EINVAL;
+@@ -1504,11 +1503,11 @@ static void wl12xx_bluetooth_enable(void)
+ static int wl12xx_set_power(struct device *dev, int slot, int on, int vdd)
+ {
+	if (on) {
+-		gpio_set_value(am335xevm_wlan_data.wlan_enable_gpio, 1);
++		gpio_direction_output(am335xevm_wlan_data.wlan_enable_gpio, 1);
+		mdelay(70);
+	}
+	else
+-		gpio_set_value(am335xevm_wlan_data.wlan_enable_gpio, 0);
++		gpio_direction_output(am335xevm_wlan_data.wlan_enable_gpio, 0);
+
+	return 0;
+ }
+diff --git a/arch/arm/mach-omap2/pm33xx.c b/arch/arm/mach-omap2/pm33xx.c
+index 70bcb42..5d88ea7 100644
+--- a/arch/arm/mach-omap2/pm33xx.c
++++ b/arch/arm/mach-omap2/pm33xx.c
+@@ -96,6 +96,13 @@ static void save_padconf(void)
+	lp_padconf.mdio_data	= readl(AM33XX_CTRL_REGADDR(0x0948));
+	lp_padconf.mdio_clk	= readl(AM33XX_CTRL_REGADDR(0x094c));
+	gmii_sel		= readl(AM33XX_CTRL_REGADDR(0x0650));
++	/* sdio */
++	lp_padconf.gpmc_a1	= readl(AM33XX_CTRL_REGADDR(0x0844));
++	lp_padconf.gpmc_a2	= readl(AM33XX_CTRL_REGADDR(0x0848));
++	lp_padconf.gpmc_a3	= readl(AM33XX_CTRL_REGADDR(0x084c));
++	lp_padconf.gpmc_ben1	= readl(AM33XX_CTRL_REGADDR(0x0878));
++	lp_padconf.gpmc_csn3	= readl(AM33XX_CTRL_REGADDR(0x0888));
++	lp_padconf.gpmc_clk	= readl(AM33XX_CTRL_REGADDR(0x088c));
+ }
+
+ static void restore_padconf(void)
+@@ -119,6 +126,13 @@ static void restore_padconf(void)
+	writel(lp_padconf.mdio_data, AM33XX_CTRL_REGADDR(0x0948));
+	writel(lp_padconf.mdio_clk, AM33XX_CTRL_REGADDR(0x094c));
+	writel(gmii_sel, AM33XX_CTRL_REGADDR(0x0650));
++	/* sdio */
++	writel(lp_padconf.gpmc_a1, AM33XX_CTRL_REGADDR(0x0844));
++	writel(lp_padconf.gpmc_a2, AM33XX_CTRL_REGADDR(0x0848));
++	writel(lp_padconf.gpmc_a3, AM33XX_CTRL_REGADDR(0x084c));
++	writel(lp_padconf.gpmc_ben1, AM33XX_CTRL_REGADDR(0x0878));
++	writel(lp_padconf.gpmc_csn3, AM33XX_CTRL_REGADDR(0x0888));
++	writel(lp_padconf.gpmc_clk, AM33XX_CTRL_REGADDR(0x088c));
+ }
+
+ static int am33xx_pm_prepare_late(void)
+diff --git a/arch/arm/mach-omap2/pm33xx.h b/arch/arm/mach-omap2/pm33xx.h
+index 2c24804..8db8b94 100644
+--- a/arch/arm/mach-omap2/pm33xx.h
++++ b/arch/arm/mach-omap2/pm33xx.h
+@@ -42,6 +42,13 @@ struct am33xx_padconf {
+	int	rmii1_refclk;
+	int	mdio_data;
+	int	mdio_clk;
++	/* sdio pads */
++	int	gpmc_a1;
++	int	gpmc_a2;
++	int	gpmc_a3;
++	int	gpmc_ben1;
++	int	gpmc_csn3;
++	int	gpmc_clk;
+ };
+ #endif /* ASSEMBLER */
+
+--
+1.7.0.4

@@ -1,0 +1,85 @@
+From 5a6a1c67ed60d6e4d07fe62fc590036991dc3415 Mon Sep 17 00:00:00 2001
+From: Eyal Reizer <eyalr@ti.com>
+Date: Wed, 28 Mar 2012 17:09:10 +0200
+Subject: [PATCH] am335x-evm: enable bluetooth suspend/resume functionality
+
+* The Uart1 pins pad configuration is lost during suspend, so we need
+  to save and restore the pad configuration when entering suspend
+
+* Enable Pull-up on the bluetooth enable pin to allow maintaining "on"
+  state during suspend
+
+Signed-off-by: Eyal Reizer <eyalr@ti.com>
+---
+ arch/arm/mach-omap2/board-am335xevm.c |    4 ++--
+ arch/arm/mach-omap2/pm33xx.c          |   10 ++++++++++
+ arch/arm/mach-omap2/pm33xx.h          |    5 +++++
+ 3 files changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-omap2/board-am335xevm.c b/arch/arm/mach-omap2/board-am335xevm.c
+index 23a7dff..2b8bf2d 100644
+--- a/arch/arm/mach-omap2/board-am335xevm.c
++++ b/arch/arm/mach-omap2/board-am335xevm.c
+@@ -887,14 +887,14 @@ static struct pinmux_config uart1_wl12xx_pin_mux[] = {
+ static struct pinmux_config wl12xx_pin_mux_evm_rev1_1a[] = {
+	{"gpmc_a0.gpio1_16", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
+	{"mcasp0_ahclkr.gpio3_17", OMAP_MUX_MODE7 | AM33XX_PIN_INPUT},
+-	{"mcasp0_ahclkx.gpio3_21", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
++	{"mcasp0_ahclkx.gpio3_21", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT_PULLUP},
+	{NULL, 0},
+  };
+
+ static struct pinmux_config wl12xx_pin_mux_evm_rev1_0[] = {
+	{"gpmc_csn1.gpio1_30", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
+	{"mcasp0_ahclkr.gpio3_17", OMAP_MUX_MODE7 | AM33XX_PIN_INPUT},
+-	{"gpmc_csn2.gpio1_31", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
++	{"gpmc_csn2.gpio1_31", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT_PULLUP},
+	{NULL, 0},
+  };
+
+diff --git a/arch/arm/mach-omap2/pm33xx.c b/arch/arm/mach-omap2/pm33xx.c
+index 5d88ea7..90c621f 100644
+--- a/arch/arm/mach-omap2/pm33xx.c
++++ b/arch/arm/mach-omap2/pm33xx.c
+@@ -103,6 +103,11 @@ static void save_padconf(void)
+	lp_padconf.gpmc_ben1	= readl(AM33XX_CTRL_REGADDR(0x0878));
+	lp_padconf.gpmc_csn3	= readl(AM33XX_CTRL_REGADDR(0x0888));
+	lp_padconf.gpmc_clk	= readl(AM33XX_CTRL_REGADDR(0x088c));
++	/* uart1 */
++	lp_padconf.uart1_ctsn	= readl(AM33XX_CTRL_REGADDR(0x0978));
++	lp_padconf.uart1_rtsn	= readl(AM33XX_CTRL_REGADDR(0x097C));
++	lp_padconf.uart1_rxd	= readl(AM33XX_CTRL_REGADDR(0x0980));
++	lp_padconf.uart1_txd	= readl(AM33XX_CTRL_REGADDR(0x0984));
+ }
+
+ static void restore_padconf(void)
+@@ -133,6 +138,11 @@ static void restore_padconf(void)
+	writel(lp_padconf.gpmc_ben1, AM33XX_CTRL_REGADDR(0x0878));
+	writel(lp_padconf.gpmc_csn3, AM33XX_CTRL_REGADDR(0x0888));
+	writel(lp_padconf.gpmc_clk, AM33XX_CTRL_REGADDR(0x088c));
++	/* Uart1 */
++	writel(lp_padconf.uart1_ctsn, AM33XX_CTRL_REGADDR(0x0978));
++	writel(lp_padconf.uart1_rtsn, AM33XX_CTRL_REGADDR(0x097C));
++	writel(lp_padconf.uart1_rxd, AM33XX_CTRL_REGADDR(0x0980));
++	writel(lp_padconf.uart1_txd, AM33XX_CTRL_REGADDR(0x0984));
+ }
+
+ static int am33xx_pm_prepare_late(void)
+diff --git a/arch/arm/mach-omap2/pm33xx.h b/arch/arm/mach-omap2/pm33xx.h
+index 8db8b94..80a18c4 100644
+--- a/arch/arm/mach-omap2/pm33xx.h
++++ b/arch/arm/mach-omap2/pm33xx.h
+@@ -49,6 +49,11 @@ struct am33xx_padconf {
+	int	gpmc_ben1;
+	int	gpmc_csn3;
+	int	gpmc_clk;
++	/* uart1 */
++	int	uart1_ctsn;
++	int	uart1_rtsn;
++	int	uart1_rxd;
++	int	uart1_txd;
+ };
+ #endif /* ASSEMBLER */
+
+--
+1.7.0.4
