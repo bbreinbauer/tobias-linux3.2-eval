@@ -70,6 +70,8 @@
 /* Convert GPIO signal to GPIO pin number */
 #define GPIO_TO_PIN(bank, gpio) (32 * (bank) + (gpio))
 
+unsigned int gigabit_enable = 1;
+
 static struct omap2_hsmmc_info am335x_mmc[] __initdata = {
         {
                 .mmc            = 1,
@@ -127,6 +129,26 @@ static struct pinmux_config mmc0_pin_mux[] = {
         {NULL, 0},
 };
 
+/* Module pin mux for mii1 */
+static struct pinmux_config mii1_pin_mux[] = {
+        {"mii1_rxerr.mii1_rxerr", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLDOWN},
+        {"mii1_txen.mii1_txen", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+        {"mii1_rxdv.mii1_rxdv", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLDOWN},
+        {"mii1_txd3.mii1_txd3", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+        {"mii1_txd2.mii1_txd2", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+        {"mii1_txd1.mii1_txd1", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+        {"mii1_txd0.mii1_txd0", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+        {"mii1_txclk.mii1_txclk", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLDOWN},
+        {"mii1_rxclk.mii1_rxclk", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLDOWN},
+        {"mii1_rxd3.mii1_rxd3", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLDOWN},
+        {"mii1_rxd2.mii1_rxd2", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLDOWN},
+        {"mii1_rxd1.mii1_rxd1", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLDOWN},
+        {"mii1_rxd0.mii1_rxd0", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLDOWN},
+        {"mdio_data.mdio_data", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
+        {"mdio_clk.mdio_clk", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT_PULLUP},
+        {NULL, 0},
+};
+
 /*
 * @pin_mux - single module pin-mux structure which defines pin-mux
 *                       details for all its pins.
@@ -151,6 +173,12 @@ static void mmc0_init(void)
         setup_pin_mux(mmc0_pin_mux);
 
         omap2_hsmmc_init(am335x_mmc);
+        return;
+}
+
+static void mii1_init(void)
+{
+        setup_pin_mux(mii1_pin_mux);
         return;
 }
 
@@ -307,6 +335,8 @@ static void __init am335x_evm_init(void)
     am335x_mmc[0].gpio_wp = -EINVAL;
 	mmc0_init();
 
+    mii1_init();
+    am33xx_cpsw_init_generic(MII_MODE_ENABLE,gigabit_enable);
 }
 
 static void __init am335x_evm_map_io(void)

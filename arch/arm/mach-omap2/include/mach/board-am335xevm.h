@@ -43,9 +43,18 @@
 #ifndef __ASSEMBLER__
 void am335x_evm_set_id(unsigned int evmid);
 int am335x_evm_get_id(void);
+
+/* Define Ethernet Phy Types */
+#define MII_MODE_ENABLE         0x0
+#define RMII_MODE_ENABLE        0x5
+#define RGMII_MODE_ENABLE       0xA
+#define MAC_MII_SEL             0x650
+
+void am33xx_evmid_fillup(unsigned int evmid);
 void am33xx_cpsw_macidfillup(char *eeprommacid0, char *eeprommacid1);
 void am33xx_sr_init(void);
 void am33xx_d_can_init(unsigned int instance);
 
+void am33xx_cpsw_init_generic(unsigned int phy_type, unsigned int gigen);
 #endif
 #endif

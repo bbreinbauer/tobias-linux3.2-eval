@@ -1740,6 +1740,65 @@ int am33xx_cpsw_init(enum am33xx_cpsw_mac_mode mode, unsigned char *phy_id0,
 	return 0;
 }
 
+/*
+	Taken from am33xx_cpsw_init, provided as a means to genrerize
+        the cpsw init from being TI board eeprom specific
+*/
+void am33xx_cpsw_init_generic(unsigned int phy_type, unsigned int gigen)
+{
+	struct omap_hwmod *oh;
+	struct platform_device *pdev;
+	u32 mac_lo, mac_hi;
+
+	mac_lo = omap_ctrl_readl(TI81XX_CONTROL_MAC_ID0_LO);
+	mac_hi = omap_ctrl_readl(TI81XX_CONTROL_MAC_ID0_HI);
+	am33xx_cpsw_slaves[0].mac_addr[0] = mac_hi & 0xFF;
+	am33xx_cpsw_slaves[0].mac_addr[1] = (mac_hi & 0xFF00) >> 8;
+	am33xx_cpsw_slaves[0].mac_addr[2] = (mac_hi & 0xFF0000) >> 16;
+	am33xx_cpsw_slaves[0].mac_addr[3] = (mac_hi & 0xFF000000) >> 24;
+	am33xx_cpsw_slaves[0].mac_addr[4] = mac_lo & 0xFF;
+	am33xx_cpsw_slaves[0].mac_addr[5] = (mac_lo & 0xFF00) >> 8;
+
+	mac_lo = omap_ctrl_readl(TI81XX_CONTROL_MAC_ID1_LO);
+	mac_hi = omap_ctrl_readl(TI81XX_CONTROL_MAC_ID1_HI);
+	am33xx_cpsw_slaves[1].mac_addr[0] = mac_hi & 0xFF;
+	am33xx_cpsw_slaves[1].mac_addr[1] = (mac_hi & 0xFF00) >> 8;
+	am33xx_cpsw_slaves[1].mac_addr[2] = (mac_hi & 0xFF0000) >> 16;
+	am33xx_cpsw_slaves[1].mac_addr[3] = (mac_hi & 0xFF000000) >> 24;
+	am33xx_cpsw_slaves[1].mac_addr[4] = mac_lo & 0xFF;
+	am33xx_cpsw_slaves[1].mac_addr[5] = (mac_lo & 0xFF00) >> 8;
+
+	__raw_writel(phy_type,
+			AM33XX_CTRL_REGADDR(MAC_MII_SEL));
+
+	memcpy(am33xx_cpsw_pdata.mac_addr,
+			am33xx_cpsw_slaves[0].mac_addr, ETH_ALEN);
+
+	oh = omap_hwmod_lookup("mdio");
+        if (!oh) {
+                pr_err("could not find cpgmac0 hwmod data\n");
+                return -ENODEV;
+        }
+        pdev = omap_device_build("davinci_mdio", 0, oh, &am33xx_cpsw_mdiopdata,
+                        sizeof(am33xx_cpsw_mdiopdata), NULL, 0, 0);
+        if (IS_ERR(pdev))
+                pr_err("could not build omap_device for cpsw\n");
+
+        oh = omap_hwmod_lookup("cpgmac0");
+        if (!oh) {
+                pr_err("could not find cpgmac0 hwmod data\n");
+                return -ENODEV;
+        }
+
+        pdev = omap_device_build("cpsw", -1, oh, &am33xx_cpsw_pdata,
+                        sizeof(am33xx_cpsw_pdata), NULL, 0, 0);
+        if (IS_ERR(pdev))
+                pr_err("could not build omap_device for cpsw\n");
+
+        return 0;
+}
+
+
 #define AM33XX_DCAN_NUM_MSG_OBJS		64
 #define AM33XX_DCAN_RAMINIT_OFFSET		0x644
 #define AM33XX_DCAN_RAMINIT_START(n)		(0x1 << n)
