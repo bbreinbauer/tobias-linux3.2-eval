@@ -67,6 +67,25 @@
 /* Header for code common to all OMAP2+ machines. */
 #include "common.h"
 
+/* Convert GPIO signal to GPIO pin number */
+#define GPIO_TO_PIN(bank, gpio) (32 * (bank) + (gpio))
+
+static struct omap2_hsmmc_info am335x_mmc[] __initdata = {
+        {
+                .mmc            = 1,
+                .caps           = MMC_CAP_4_BIT_DATA,
+                .gpio_cd        = GPIO_TO_PIN(0, 6),
+                .gpio_wp        = GPIO_TO_PIN(3, 18),
+                .ocr_mask       = MMC_VDD_32_33 | MMC_VDD_33_34, /* 3V3 */
+        },
+        {
+                .mmc            = 0,    /* will be set at runtime */
+        },
+        {
+                .mmc            = 0,    /* will be set at runtime */
+        },
+        {}      /* Terminator */
+};
 
 //***************** EVM ID is necessary in some supporting SW for AM335x - 
 //* To eliminate dependency, board port developers should search for 
@@ -95,6 +114,19 @@ struct pinmux_config {
         int val; /* Options for the mux register value */
 };
 
+/* Module pin mux for mmc0 */
+static struct pinmux_config mmc0_pin_mux[] = {
+        {"mmc0_dat3.mmc0_dat3", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
+        {"mmc0_dat2.mmc0_dat2", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
+        {"mmc0_dat1.mmc0_dat1", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
+        {"mmc0_dat0.mmc0_dat0", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
+        {"mmc0_clk.mmc0_clk",   OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
+        {"mmc0_cmd.mmc0_cmd",   OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
+        {"mcasp0_aclkr.mmc0_sdwp", OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},
+        {"spi0_cs1.mmc0_sdcd",  OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},
+        {NULL, 0},
+};
+
 /*
 * @pin_mux - single module pin-mux structure which defines pin-mux
 *                       details for all its pins.
@@ -113,6 +145,14 @@ static struct pinmux_config clkout2_pin_mux[] = {
         {"xdma_event_intr1.clkout2", OMAP_MUX_MODE3 | AM33XX_PIN_OUTPUT},
         {NULL, 0},
 };
+
+static void mmc0_init(void)
+{
+        setup_pin_mux(mmc0_pin_mux);
+
+        omap2_hsmmc_init(am335x_mmc);
+        return;
+}
 
 static void __init clkout2_enable(void)
 {
@@ -262,6 +302,10 @@ static void __init am335x_evm_init(void)
     am335x_rtc_init();
     clkout2_enable();
     omap_sdrc_init(NULL, NULL);
+
+   /* Beagle Bone has Micro-SD slot which doesn't have Write Protect pin */
+    am335x_mmc[0].gpio_wp = -EINVAL;
+	mmc0_init();
 
 }
 
