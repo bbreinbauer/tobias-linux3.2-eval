@@ -38,6 +38,8 @@
 #include <linux/pwm_backlight.h>
 #include <linux/rtc/rtc-omap.h>
 #include <linux/pwm/pwm.h>
+#include <linux/input/ti_tsc.h>
+#include <linux/mfd/ti_tscadc.h>
 
 /* LCD controller is similar to DA850 */
 #include <video/da8xx-fb.h>
@@ -122,6 +124,17 @@ struct da8xx_lcdc_platform_data bbcape7_pdata = {
 	.manu_name		= "ThreeFive",
 	.controller_data	= &bbcape7_cfg,
 	.type			= "TFC_S9700RTWV35TR_01B",
+};
+
+/* TSc controller */
+static struct tsc_data am335x_touchscreen_data  = {
+        .wires  = 4,
+        .x_plate_resistance = 200,
+        .steps_to_configure = 5,
+};
+
+static struct mfd_tscadc_board tscadc = {
+    .tsc_init = &am335x_touchscreen_data,
 };
 
 static struct omap2_hsmmc_info am335x_mmc[] __initdata = {
@@ -213,6 +226,17 @@ static struct pinmux_config bbcape7_pin_mux[] = {
 	{"lcd_pclk.lcd_pclk",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
 	{"lcd_ac_bias_en.lcd_ac_bias_en", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
 	{"ecap0_in_pwm0_out.gpio0_7", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT}, // AVDD_EN
+	{NULL, 0},
+};
+
+/* Module pin mux for touchscreen controller */
+static struct pinmux_config tsc_pin_mux[] = {
+	{"ain0.ain0",           OMAP_MUX_MODE0 | AM33XX_INPUT_EN},
+	{"ain1.ain1",           OMAP_MUX_MODE0 | AM33XX_INPUT_EN},
+	{"ain2.ain2",           OMAP_MUX_MODE0 | AM33XX_INPUT_EN},
+	{"ain3.ain3",           OMAP_MUX_MODE0 | AM33XX_INPUT_EN},
+	{"vrefp.vrefp",         OMAP_MUX_MODE0 | AM33XX_INPUT_EN},
+	{"vrefn.vrefn",         OMAP_MUX_MODE0 | AM33XX_INPUT_EN},
 	{NULL, 0},
 };
 
@@ -345,6 +369,17 @@ static void bbcape7lcd_init(void)
 		pr_info("Failed to register Beagleboard LCD cape device\n");
 
 	return;
+}
+
+/* Initialize and register tsc device */
+static void mfd_tscadc_init(void)
+{
+	int err;
+
+	setup_pin_mux(tsc_pin_mux);
+	err = am33xx_register_mfd_tscadc(&tscadc);
+	if (err)
+		pr_err("failed to register touchscreen device\n");
 }
 
 static void mmc0_init(void)
@@ -511,6 +546,7 @@ static void __init am335x_evm_init(void)
 	omap_sdrc_init(NULL, NULL);
 	enable_ehrpwm1();
 	bbcape7lcd_init();
+	mfd_tscadc_init();
 
 	/* Beagle Bone has Micro-SD slot which doesn't have Write Protect pin */
 	am335x_mmc[0].gpio_wp = -EINVAL;
