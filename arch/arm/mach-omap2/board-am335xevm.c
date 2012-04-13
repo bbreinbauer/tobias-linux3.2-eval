@@ -37,6 +37,7 @@
 #include <linux/mfd/tps65217.h>
 #include <linux/pwm_backlight.h>
 #include <linux/rtc/rtc-omap.h>
+#include <linux/pwm/pwm.h>
 
 /* LCD controller is similar to DA850 */
 #include <video/da8xx-fb.h>
@@ -71,6 +72,24 @@
 #define GPIO_TO_PIN(bank, gpio) (32 * (bank) + (gpio))
 
 unsigned int gigabit_enable = 1;
+
+/* eHRPWM is used to enable LCD backlight */
+static int ehrpwm_backlight_enable;
+
+/* LCD backlight platform Data */
+#define AM335X_BACKLIGHT_MAX_BRIGHTNESS        100
+#define AM335X_BACKLIGHT_DEFAULT_BRIGHTNESS    50
+#define AM335X_PWM_PERIOD_NANO_SECONDS        (1000000 * 5)
+
+#define BBCAPE7LCD_PWM_DEVICE_ID   "ehrpwm.1:0"
+
+static struct platform_pwm_backlight_data bbcape7lcd_backlight_data = {
+	.pwm_id         = BBCAPE7LCD_PWM_DEVICE_ID,
+	.ch             = -1,
+	.max_brightness = AM335X_BACKLIGHT_MAX_BRIGHTNESS,
+	.dft_brightness = AM335X_BACKLIGHT_DEFAULT_BRIGHTNESS,
+	.pwm_period_ns  = AM335X_PWM_PERIOD_NANO_SECONDS,
+};
 
 static struct omap2_hsmmc_info am335x_mmc[] __initdata = {
         {
@@ -114,6 +133,12 @@ EXPORT_SYMBOL(am335x_evm_get_id);
 struct pinmux_config {
         const char *string_name; /* signal name format */
         int val; /* Options for the mux register value */
+};
+
+/* Module pin mux for LCD backlight */
+static struct pinmux_config ehrpwm_pin_mux[] = {
+        {"gpmc_a2.ehrpwm1A", OMAP_MUX_MODE6 | AM33XX_PIN_OUTPUT},
+        {NULL, 0},
 };
 
 /* Module pin mux for mmc0 */
@@ -167,6 +192,46 @@ static struct pinmux_config clkout2_pin_mux[] = {
         {"xdma_event_intr1.clkout2", OMAP_MUX_MODE3 | AM33XX_PIN_OUTPUT},
         {NULL, 0},
 };
+
+/* Enable ehrpwm for backlight control */
+static void enable_ehrpwm1(void)
+{
+	ehrpwm_backlight_enable = true;
+	setup_pin_mux(ehrpwm_pin_mux);
+}
+
+/* Setup pwm-backlight for bbtoys7lcd */
+static struct platform_device bbtoys7lcd_backlight = {
+	.name           = "pwm-backlight",
+	.id             = -1,
+	.dev            = {
+		.platform_data  = &bbcape7lcd_backlight_data,
+	}
+};
+
+static struct pwmss_platform_data  pwm_pdata[3] = {
+        {
+                .version = PWM_VERSION_1,
+        },
+        {
+                .version = PWM_VERSION_1,
+        },
+        {
+                .version = PWM_VERSION_1,
+        },
+};
+
+/* Initialize and enable ehrpwm */
+static int __init ehrpwm1_init(void)
+{
+	int status = 0;
+	if (ehrpwm_backlight_enable) {
+                am33xx_register_ehrpwm(1, &pwm_pdata[0]);
+		platform_device_register(&bbtoys7lcd_backlight);
+	}
+	return status;
+}
+late_initcall(ehrpwm1_init);
 
 static void mmc0_init(void)
 {
@@ -324,19 +389,20 @@ static void am335x_rtc_init()
 /* Called as part of board initialization, defined in MACHINE_START */
 static void __init am335x_evm_init(void)
 {
-    am33xx_cpuidle_init();
+	am33xx_cpuidle_init();
 	am33xx_mux_init(NULL);
-    omap_serial_init();
-    am335x_rtc_init();
-    clkout2_enable();
-    omap_sdrc_init(NULL, NULL);
+	omap_serial_init();
+	am335x_rtc_init();
+	clkout2_enable();
+	omap_sdrc_init(NULL, NULL);
+	enable_ehrpwm1();
 
-   /* Beagle Bone has Micro-SD slot which doesn't have Write Protect pin */
-    am335x_mmc[0].gpio_wp = -EINVAL;
+	/* Beagle Bone has Micro-SD slot which doesn't have Write Protect pin */
+	am335x_mmc[0].gpio_wp = -EINVAL;
 	mmc0_init();
 
-    mii1_init();
-    am33xx_cpsw_init_generic(MII_MODE_ENABLE,gigabit_enable);
+	mii1_init();
+	am33xx_cpsw_init_generic(MII_MODE_ENABLE,gigabit_enable);
 }
 
 static void __init am335x_evm_map_io(void)
