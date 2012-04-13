@@ -91,6 +91,39 @@ static struct platform_pwm_backlight_data bbcape7lcd_backlight_data = {
 	.pwm_period_ns  = AM335X_PWM_PERIOD_NANO_SECONDS,
 };
 
+/* Beaglebone 7" Cape is 800x480 resolution/16bpp  */
+static const struct display_panel bbcape7_panel = {
+        WVGA,
+        16,
+        16,
+        COLOR_ACTIVE,
+};
+
+/* Define display configuration */
+static struct lcd_ctrl_config bbcape7_cfg = {
+	&bbcape7_panel,
+	.ac_bias		= 255,
+	.ac_bias_intrpt		= 0,
+	.dma_burst_sz		= 16,
+	.bpp			= 16,
+	.fdd			= 0x80,
+	.tft_alt_mode		= 0,
+	.stn_565_mode		= 0,
+	.mono_8bit_mode		= 0,
+	.invert_line_clock	= 1,
+	.invert_frm_clock	= 1,
+	.sync_edge		= 0,
+	.sync_ctrl		= 1,
+	.raster_order		= 0,
+};
+
+/* ThreeFive LCD panel timings are defined in da8xx-fb display driver */
+struct da8xx_lcdc_platform_data bbcape7_pdata = {
+	.manu_name		= "ThreeFive",
+	.controller_data	= &bbcape7_cfg,
+	.type			= "TFC_S9700RTWV35TR_01B",
+};
+
 static struct omap2_hsmmc_info am335x_mmc[] __initdata = {
         {
                 .mmc            = 1,
@@ -139,6 +172,48 @@ struct pinmux_config {
 static struct pinmux_config ehrpwm_pin_mux[] = {
         {"gpmc_a2.ehrpwm1A", OMAP_MUX_MODE6 | AM33XX_PIN_OUTPUT},
         {NULL, 0},
+};
+
+/* Module pin mux for Beagleboard 7" LCD cape */
+static struct pinmux_config bbcape7_pin_mux[] = {
+	{"lcd_data0.lcd_data0",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
+	{"lcd_data1.lcd_data1",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
+	{"lcd_data2.lcd_data2",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
+	{"lcd_data3.lcd_data3",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
+	{"lcd_data4.lcd_data4",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
+	{"lcd_data5.lcd_data5",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
+	{"lcd_data6.lcd_data6",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
+	{"lcd_data7.lcd_data7",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
+	{"lcd_data8.lcd_data8",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
+	{"lcd_data9.lcd_data9",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
+	{"lcd_data10.lcd_data10",	OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
+	{"lcd_data11.lcd_data11",	OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
+	{"lcd_data12.lcd_data12",	OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
+	{"lcd_data13.lcd_data13",	OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
+	{"lcd_data14.lcd_data14",	OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
+	{"lcd_data15.lcd_data15",	OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
+	{"lcd_vsync.lcd_vsync",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+	{"lcd_hsync.lcd_hsync",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+	{"lcd_pclk.lcd_pclk",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+	{"lcd_ac_bias_en.lcd_ac_bias_en", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+	{"ecap0_in_pwm0_out.gpio0_7", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT}, // AVDD_EN
+	{NULL, 0},
 };
 
 /* Module pin mux for mmc0 */
@@ -232,6 +307,45 @@ static int __init ehrpwm1_init(void)
 	return status;
 }
 late_initcall(ehrpwm1_init);
+
+/* Configure display pll */
+static int __init conf_disp_pll(int rate)
+{
+	struct clk *disp_pll;
+	int ret = -EINVAL;
+
+	disp_pll = clk_get(NULL, "dpll_disp_ck");
+	if (IS_ERR(disp_pll)) {
+		pr_err("Cannot clk_get disp_pll\n");
+		goto out;
+	}
+
+	ret = clk_set_rate(disp_pll, rate);
+	clk_put(disp_pll);
+out:
+	return ret;
+}
+
+/* Initialize and register lcdc device */
+#define BEAGLEBONE_LCD_AVDD_EN GPIO_TO_PIN(0, 7)
+
+static void bbcape7lcd_init(void)
+{
+	setup_pin_mux(bbcape7_pin_mux);
+	gpio_request(BEAGLEBONE_LCD_AVDD_EN, "BONE_LCD_AVDD_EN");
+	gpio_direction_output(BEAGLEBONE_LCD_AVDD_EN, 1);
+
+	if (conf_disp_pll(300000000)) {
+		pr_info("Failed to set pixclock to 300000000, not attempting to"
+				"register LCD cape\n");
+		return;
+	}
+
+	if (am33xx_register_lcdc(&bbcape7_pdata))
+		pr_info("Failed to register Beagleboard LCD cape device\n");
+
+	return;
+}
 
 static void mmc0_init(void)
 {
@@ -396,6 +510,7 @@ static void __init am335x_evm_init(void)
 	clkout2_enable();
 	omap_sdrc_init(NULL, NULL);
 	enable_ehrpwm1();
+	bbcape7lcd_init();
 
 	/* Beagle Bone has Micro-SD slot which doesn't have Write Protect pin */
 	am335x_mmc[0].gpio_wp = -EINVAL;
