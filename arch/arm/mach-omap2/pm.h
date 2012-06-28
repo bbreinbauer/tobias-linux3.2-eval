@@ -100,8 +100,9 @@ extern void omap3_save_scratchpad_contents(void);
 /* am33xx_do_wfi function pointer and size, for copy to SRAM */
 extern void am33xx_do_wfi(void);
 extern unsigned int am33xx_do_wfi_sz;
+extern unsigned int am33xx_resume_offset;
 /* ... and its pointer from SRAM after copy */
-extern void (*am33xx_do_wfi_sram)(void);
+extern void (*am33xx_do_wfi_sram)(u32 *);
 /* The resume location */
 extern void am33xx_resume_vector(void);
 

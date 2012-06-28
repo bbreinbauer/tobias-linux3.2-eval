@@ -60,6 +60,8 @@
 #define CPDMA_DESC_EOQ		BIT(28)
 #define CPDMA_DESC_TD_COMPLETE	BIT(27)
 #define CPDMA_DESC_PASS_CRC	BIT(26)
+#define CPDMA_DESC_TO_PORT_EN	BIT(20)
+#define CPDMA_DESC_PORT_MASK	(BIT(18) | BIT(17) | BIT(16))
 
 #define CPDMA_TEARDOWN_VALUE	0xfffffffc
 
@@ -105,13 +107,13 @@ struct cpdma_ctlr {
 };
 
 struct cpdma_chan {
+	struct cpdma_desc __iomem	*head, *tail;
+	void __iomem			*hdp, *cp, *rxfree;
 	enum cpdma_state		state;
 	struct cpdma_ctlr		*ctlr;
 	int				chan_num;
 	spinlock_t			lock;
-	struct cpdma_desc __iomem	*head, *tail;
 	int				count;
-	void __iomem			*hdp, *cp, *rxfree;
 	u32				mask;
 	cpdma_handler_fn		handler;
 	enum dma_data_direction		dir;
@@ -217,7 +219,7 @@ desc_from_phys(struct cpdma_desc_pool *pool, dma_addr_t dma)
 }
 
 static struct cpdma_desc __iomem *
-cpdma_desc_alloc(struct cpdma_desc_pool *pool, int num_desc)
+cpdma_desc_alloc(struct cpdma_desc_pool *pool, int num_desc, bool is_rx)
 {
 	unsigned long flags;
 	int index;
@@ -225,8 +227,14 @@ cpdma_desc_alloc(struct cpdma_desc_pool *pool, int num_desc)
 
 	spin_lock_irqsave(&pool->lock, flags);
 
-	index = bitmap_find_next_zero_area(pool->bitmap, pool->num_desc, 0,
-					   num_desc, 0);
+	if (is_rx) {
+		index = bitmap_find_next_zero_area(pool->bitmap,
+				pool->num_desc/2, 0, num_desc, 0);
+	 } else {
+		index = bitmap_find_next_zero_area(pool->bitmap,
+				pool->num_desc, pool->num_desc/2, num_desc, 0);
+	}
+
 	if (index < pool->num_desc) {
 		bitmap_set(pool->bitmap, index, num_desc);
 		desc = pool->iomap + pool->desc_size * index;
@@ -350,17 +358,6 @@ int cpdma_ctlr_stop(struct cpdma_ctlr *ctlr)
 	dma_reg_write(ctlr, CPDMA_RXCONTROL, 0);
 
 	ctlr->state = CPDMA_STATE_IDLE;
-
-	if (ctlr->params.has_soft_reset) {
-		unsigned long timeout = jiffies + HZ/10;
-
-		dma_reg_write(ctlr, CPDMA_SOFTRESET, 1);
-		while (time_before(jiffies, timeout)) {
-			if (dma_reg_read(ctlr, CPDMA_SOFTRESET) == 0)
-				break;
-		}
-		WARN_ON(!time_before(jiffies, timeout));
-	}
 
 	spin_unlock_irqrestore(&ctlr->lock, flags);
 	return 0;
@@ -666,7 +663,7 @@ static void __cpdma_chan_submit(struct cpdma_chan *chan,
 }
 
 int cpdma_chan_submit(struct cpdma_chan *chan, void *token, void *data,
-		      int len, gfp_t gfp_mask)
+		      int len, int directed, gfp_t gfp_mask)
 {
 	struct cpdma_ctlr		*ctlr = chan->ctlr;
 	struct cpdma_desc __iomem	*desc;
@@ -674,6 +671,7 @@ int cpdma_chan_submit(struct cpdma_chan *chan, void *token, void *data,
 	unsigned long			flags;
 	u32				mode;
 	int				ret = 0;
+	bool                            is_rx;
 
 	spin_lock_irqsave(&chan->lock, flags);
 
@@ -682,7 +680,8 @@ int cpdma_chan_submit(struct cpdma_chan *chan, void *token, void *data,
 		goto unlock_ret;
 	}
 
-	desc = cpdma_desc_alloc(ctlr->pool, 1);
+	is_rx = (chan->rxfree != 0);
+	desc = cpdma_desc_alloc(ctlr->pool, 1, is_rx);
 	if (!desc) {
 		chan->stats.desc_alloc_fail++;
 		ret = -ENOMEM;
@@ -696,6 +695,8 @@ int cpdma_chan_submit(struct cpdma_chan *chan, void *token, void *data,
 
 	buffer = dma_map_single(ctlr->dev, data, len, chan->dir);
 	mode = CPDMA_DESC_OWNER | CPDMA_DESC_SOP | CPDMA_DESC_EOP;
+	if ((!is_rx) && ((directed == 1) || (directed == 2)))
+		mode |= (CPDMA_DESC_TO_PORT_EN | (directed << 16));
 
 	desc_write(desc, hw_next,   0);
 	desc_write(desc, hw_buffer, buffer);
@@ -760,14 +761,16 @@ static int __cpdma_chan_process(struct cpdma_chan *chan)
 		status = -EBUSY;
 		goto unlock_ret;
 	}
-	status	= status & (CPDMA_DESC_EOQ | CPDMA_DESC_TD_COMPLETE);
+	status	= status & (CPDMA_DESC_EOQ | CPDMA_DESC_TD_COMPLETE |
+			    CPDMA_DESC_PORT_MASK);
 
 	chan->head = desc_from_phys(pool, desc_read(desc, hw_next));
 	chan_write(chan, cp, desc_dma);
 	chan->count--;
 	chan->stats.good_dequeue++;
 
-	if (status & CPDMA_DESC_EOQ) {
+	if ((status & CPDMA_DESC_EOQ) && (chan->head) &&
+			(!(status & CPDMA_DESC_TD_COMPLETE))) {
 		chan->stats.requeue++;
 		chan_write(chan, hdp, desc_phys(pool, chan->head));
 	}

@@ -89,6 +89,7 @@
 #define TSCADC_CNTRLREG_TSCSSENB	BIT(0)
 #define TSCADC_CNTRLREG_STEPID		BIT(1)
 #define TSCADC_CNTRLREG_STEPCONFIGWRT	BIT(2)
+#define TSCADC_CNTRLREG_POWERDOWN	BIT(4)
 #define TSCADC_CNTRLREG_TSCENB		BIT(7)
 #define TSCADC_CNTRLREG_4WIRE		(0x1 << 5)
 #define TSCADC_CNTRLREG_5WIRE		(0x1 << 6)
@@ -106,7 +107,6 @@ unsigned int bckup_x = 0, bckup_y = 0;
 struct tscadc {
 	struct input_dev	*input;
 	int			wires;
-	int			analog_input;
 	int			x_plate_resistance;
 	int			irq;
 	void __iomem		*tsc_base;
@@ -140,29 +140,16 @@ static void tsc_step_config(struct tscadc *ts_dev)
 
 	switch (ts_dev->wires) {
 	case 4:
-		if (ts_dev->analog_input == 0)
-			stepconfigx |= TSCADC_STEPCONFIG_INP_4 |
-				TSCADC_STEPCONFIG_YPN;
-		else
-			stepconfigx |= TSCADC_STEPCONFIG_INP |
+		stepconfigx |= TSCADC_STEPCONFIG_INP |
 				TSCADC_STEPCONFIG_XNN;
 		break;
 	case 5:
 		stepconfigx |= TSCADC_STEPCONFIG_YNN |
-				TSCADC_STEPCONFIG_INP_5;
-		if (ts_dev->analog_input == 0)
-			stepconfigx |= TSCADC_STEPCONFIG_XNP |
-				TSCADC_STEPCONFIG_YPN;
-		else
-			stepconfigx |= TSCADC_STEPCONFIG_XNN |
+				TSCADC_STEPCONFIG_INP_5 | TSCADC_STEPCONFIG_XNN |
 				TSCADC_STEPCONFIG_YPP;
 		break;
 	case 8:
-		if (ts_dev->analog_input == 0)
-			stepconfigx |= TSCADC_STEPCONFIG_INP_4 |
-				TSCADC_STEPCONFIG_YPN;
-		else
-			stepconfigx |= TSCADC_STEPCONFIG_INP |
+		stepconfigx |= TSCADC_STEPCONFIG_INP |
 				TSCADC_STEPCONFIG_XNN;
 		break;
 	}
@@ -177,25 +164,14 @@ static void tsc_step_config(struct tscadc *ts_dev)
 			TSCADC_STEPCONFIG_INM | TSCADC_STEPCONFIG_FIFO1;
 	switch (ts_dev->wires) {
 	case 4:
-		if (ts_dev->analog_input == 0)
-			stepconfigy |= TSCADC_STEPCONFIG_XNP;
-		else
-			stepconfigy |= TSCADC_STEPCONFIG_YPP;
+		stepconfigy |= TSCADC_STEPCONFIG_YPP;
 		break;
 	case 5:
-		stepconfigy |= TSCADC_STEPCONFIG_XPP | TSCADC_STEPCONFIG_INP_5;
-		if (ts_dev->analog_input == 0)
-			stepconfigy |= TSCADC_STEPCONFIG_XNN |
-				TSCADC_STEPCONFIG_YPP;
-		else
-			stepconfigy |= TSCADC_STEPCONFIG_XNP |
-				TSCADC_STEPCONFIG_YPN;
+		stepconfigy |= TSCADC_STEPCONFIG_XPP | TSCADC_STEPCONFIG_INP_5 |
+			TSCADC_STEPCONFIG_XNP | TSCADC_STEPCONFIG_YPN;
 		break;
 	case 8:
-		if (ts_dev->analog_input == 0)
-			stepconfigy |= TSCADC_STEPCONFIG_XNP;
-		else
-			stepconfigy |= TSCADC_STEPCONFIG_YPP;
+		stepconfigy |= TSCADC_STEPCONFIG_YPP;
 		break;
 	}
 
@@ -204,15 +180,9 @@ static void tsc_step_config(struct tscadc *ts_dev)
 		tscadc_writel(ts_dev, TSCADC_REG_STEPDELAY(i), delay);
 	}
 
-	chargeconfig = TSCADC_STEPCONFIG_XPP |
-			TSCADC_STEPCONFIG_YNN |
-			TSCADC_STEPCONFIG_RFP |
-			TSCADC_STEPCHARGE_RFM;
-	if (ts_dev->analog_input == 0)
-		chargeconfig |= TSCADC_STEPCHARGE_INM_SWAP |
-			TSCADC_STEPCHARGE_INP_SWAP;
-	else
-		chargeconfig |= TSCADC_STEPCHARGE_INM | TSCADC_STEPCHARGE_INP;
+	chargeconfig = TSCADC_STEPCONFIG_XPP | TSCADC_STEPCONFIG_YNN |
+			TSCADC_STEPCONFIG_RFP | TSCADC_STEPCHARGE_RFM |
+			TSCADC_STEPCHARGE_INM | TSCADC_STEPCHARGE_INP;
 	tscadc_writel(ts_dev, TSCADC_REG_CHARGECONFIG, chargeconfig);
 	tscadc_writel(ts_dev, TSCADC_REG_CHARGEDELAY, TSCADC_STEPCHARGE_DELAY);
 
@@ -236,12 +206,8 @@ static void tsc_idle_config(struct tscadc *ts_config)
 	/* Idle mode touch screen config */
 	unsigned int	 idleconfig;
 
-	idleconfig = TSCADC_STEPCONFIG_YNN |
-			TSCADC_STEPCONFIG_INM | TSCADC_STEPCONFIG_IDLE_INP;
-	if (ts_config->analog_input == 0)
-		idleconfig |= TSCADC_STEPCONFIG_XNN;
-	else
-		idleconfig |= TSCADC_STEPCONFIG_YPN;
+	idleconfig = TSCADC_STEPCONFIG_YNN | TSCADC_STEPCONFIG_INM |
+			TSCADC_STEPCONFIG_IDLE_INP | TSCADC_STEPCONFIG_YPN;
 
 	tscadc_writel(ts_config, TSCADC_REG_IDLECONFIG, idleconfig);
 }
@@ -444,6 +410,7 @@ static	int __devinit tscadc_probe(struct platform_device *pdev)
 		goto err_free_irq;
 	}
 	clock_rate = clk_get_rate(clk);
+	clk_put(clk);
 	clk_value = clock_rate / ADC_CLK;
 	if (clk_value < 7) {
 		dev_err(&pdev->dev, "clock input less than min clock requirement\n");
@@ -455,7 +422,6 @@ static	int __devinit tscadc_probe(struct platform_device *pdev)
 	tscadc_writel(ts_dev, TSCADC_REG_CLKDIV, clk_value);
 
 	ts_dev->wires = pdata->wires;
-	ts_dev->analog_input = pdata->analog_input;
 	ts_dev->x_plate_resistance = pdata->x_plate_resistance;
 
 	/* Set the control register bits */
@@ -510,6 +476,7 @@ static	int __devinit tscadc_probe(struct platform_device *pdev)
 	return 0;
 
 err_fail:
+	pm_runtime_put_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
 err_free_irq:
 	free_irq(ts_dev->irq, ts_dev);
@@ -519,6 +486,7 @@ err_release_mem:
 	release_mem_region(res->start, resource_size(res));
 	input_free_device(ts_dev->input);
 err_free_mem:
+	platform_set_drvdata(pdev, NULL);
 	kfree(ts_dev);
 	return err;
 }
@@ -528,6 +496,7 @@ static int __devexit tscadc_remove(struct platform_device *pdev)
 	struct tscadc		*ts_dev = platform_get_drvdata(pdev);
 	struct resource		*res;
 
+	tscadc_writel(ts_dev, TSCADC_REG_SE, 0x00);
 	free_irq(ts_dev->irq, ts_dev);
 
 	input_unregister_device(ts_dev->input);
@@ -536,6 +505,7 @@ static int __devexit tscadc_remove(struct platform_device *pdev)
 	iounmap(ts_dev->tsc_base);
 	release_mem_region(res->start, resource_size(res));
 
+	pm_runtime_put_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
 
 	kfree(ts_dev);
@@ -554,14 +524,15 @@ static int tscadc_suspend(struct platform_device *pdev, pm_message_t state)
 		idle = tscadc_readl(ts_dev, TSCADC_REG_IRQENABLE);
 		tscadc_writel(ts_dev, TSCADC_REG_IRQENABLE,
 				(idle | TSCADC_IRQENB_HW_PEN));
+		tscadc_writel(ts_dev, TSCADC_REG_SE, 0x00);
 		tscadc_writel(ts_dev, TSCADC_REG_IRQWAKEUP, TSCADC_IRQWKUP_ENB);
-	}
-
+	} else {
 	/* module disable */
-	idle = 0;
 	idle = tscadc_readl(ts_dev, TSCADC_REG_CTRL);
 	idle &= ~(TSCADC_CNTRLREG_TSCSSENB);
-	tscadc_writel(ts_dev, TSCADC_REG_CTRL, idle);
+	tscadc_writel(ts_dev, TSCADC_REG_CTRL, (idle |
+				TSCADC_CNTRLREG_POWERDOWN));
+	}
 
 	pm_runtime_put_sync(&pdev->dev);
 
@@ -584,6 +555,10 @@ static int tscadc_resume(struct platform_device *pdev)
 
 	/* context restore */
 	tscadc_writel(ts_dev, TSCADC_REG_CTRL, ts_dev->ctrl);
+	/* Make sure ADC is powered up */
+	restore = tscadc_readl(ts_dev, TSCADC_REG_CTRL);
+	restore &= ~(TSCADC_CNTRLREG_POWERDOWN);
+	tscadc_writel(ts_dev, TSCADC_REG_CTRL, restore);
 	tsc_idle_config(ts_dev);
 	tsc_step_config(ts_dev);
 	tscadc_writel(ts_dev, TSCADC_REG_FIFO1THR, 6);

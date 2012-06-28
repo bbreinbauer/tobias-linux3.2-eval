@@ -34,8 +34,10 @@
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/pm_runtime.h>
+#include <linux/lcm.h>
 #include <video/da8xx-fb.h>
 #include <asm/mach-types.h>
+#include <asm/div64.h>
 
 #define DRIVER_NAME "da8xx_lcdc"
 
@@ -191,7 +193,6 @@ static struct fb_var_screeninfo da8xx_fb_var __devinitdata = {
 	.activate = 0,
 	.height = -1,
 	.width = -1,
-	.pixclock = 33333,/*Pico Sec*/
 	.accel_flags = 0,
 	.left_margin = LEFT_MARGIN,
 	.right_margin = RIGHT_MARGIN,
@@ -270,6 +271,20 @@ static struct da8xx_panel known_lcd_panels[] = {
 		.vbp = 29,
 		.vsw = 2,
 		.pxl_clk = 30000000,
+		.invert_pxl_clk = 0,
+	},
+	/* Newhaven Display */
+	[3] = {
+		.name = "NHD-4.3-ATXI#-T-1",
+		.width = 480,
+		.height = 272,
+		.hfp = 8,
+		.hbp = 43,
+		.hsw = 4,
+		.vfp = 4,
+		.vbp = 12,
+		.vsw = 10,
+		.pxl_clk = 9000000,
 		.invert_pxl_clk = 0,
 	},
 };
@@ -1224,6 +1239,22 @@ static struct fb_ops da8xx_fb_ops = {
 	.fb_blank = cfb_blank,
 };
 
+/* Calculate and return pixel clock period in pico seconds */
+static unsigned int da8xxfb_pixel_clk_period(struct da8xx_fb_par *par)
+{
+	unsigned int lcd_clk, div;
+	unsigned int configured_pix_clk;
+	unsigned long long pix_clk_period_picosec = 1000000000000ULL;
+
+	lcd_clk = clk_get_rate(par->lcdc_clk);
+	div = lcd_clk / par->pxl_clk;
+	configured_pix_clk = (lcd_clk / div);
+
+	do_div(pix_clk_period_picosec, configured_pix_clk);
+
+	return pix_clk_period_picosec;
+}
+
 static int __devinit fb_probe(struct platform_device *device)
 {
 	struct da8xx_lcdc_platform_data *fb_pdata =
@@ -1235,6 +1266,7 @@ static int __devinit fb_probe(struct platform_device *device)
 	struct da8xx_fb_par *par;
 	resource_size_t len;
 	int ret, i;
+	unsigned long ulcm;
 
 	if (fb_pdata == NULL) {
 		dev_err(&device->dev, "Can not get platform data\n");
@@ -1334,7 +1366,8 @@ static int __devinit fb_probe(struct platform_device *device)
 
 	/* allocate frame buffer */
 	par->vram_size = lcdc_info->width * lcdc_info->height * lcd_cfg->bpp;
-	par->vram_size = PAGE_ALIGN(par->vram_size/8);
+	ulcm = lcm((lcdc_info->width * lcd_cfg->bpp)/8, PAGE_SIZE);
+	par->vram_size = roundup(par->vram_size/8, ulcm);
 	par->vram_size = par->vram_size * LCD_NUM_BUFFERS;
 
 	par->vram_virt = dma_alloc_coherent(NULL,
@@ -1392,6 +1425,7 @@ static int __devinit fb_probe(struct platform_device *device)
 
 	da8xx_fb_var.hsync_len = lcdc_info->hsw;
 	da8xx_fb_var.vsync_len = lcdc_info->vsw;
+	da8xx_fb_var.pixclock = da8xxfb_pixel_clk_period(par);
 
 	da8xx_fb_var.right_margin = lcdc_info->hfp;
 	da8xx_fb_var.left_margin  = lcdc_info->hbp;

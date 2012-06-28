@@ -1020,6 +1020,7 @@ static int musb_gadget_enable(struct usb_ep *ep,
 		goto fail;
 	}
 	musb_ep->type = usb_endpoint_type(desc);
+	hw_ep->xfer_type = musb_ep->type;
 
 	/* check direction and (later) maxpacket size against endpoint */
 	if (usb_endpoint_num(desc) != epnum)
@@ -2039,6 +2040,7 @@ static int musb_gadget_stop(struct usb_gadget *g,
 	if (!is_otg_enabled(musb))
 		musb_stop(musb);
 
+	musb->gadget_driver = NULL;
 	pm_runtime_put(musb->controller);
 
 	return 0;

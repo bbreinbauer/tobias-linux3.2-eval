@@ -26,11 +26,13 @@
 #include <linux/completion.h>
 #include <linux/pm_runtime.h>
 
+#include <mach/board-am335xevm.h>
 #include <plat/prcm.h>
 #include <plat/mailbox.h>
 #include <plat/sram.h>
 #include <plat/omap_hwmod.h>
 #include <plat/omap_device.h>
+#include <plat/emif.h>
 
 #include <asm/suspend.h>
 #include <asm/proc-fns.h>
@@ -43,106 +45,50 @@
 #include "clockdomain.h"
 #include "powerdomain.h"
 
-void (*am33xx_do_wfi_sram)(void);
+void (*am33xx_do_wfi_sram)(u32 *);
 
 #define DS_MODE		DS0_ID	/* DS0/1_ID */
 #define MODULE_DISABLE	0x0
 #define MODULE_ENABLE	0x2
 
 #ifdef CONFIG_SUSPEND
-
 void __iomem *ipc_regs;
 void __iomem *m3_eoi;
 void __iomem *m3_code;
+u32 suspend_cfg_param_list[SUSPEND_CFG_PARAMS_END];
 
 bool enable_deep_sleep = true;
 static suspend_state_t suspend_state = PM_SUSPEND_ON;
 
 static struct device *mpu_dev;
 static struct omap_mbox *m3_mbox;
-static struct powerdomain *cefuse_pwrdm, *gfx_pwrdm;
+static struct powerdomain *cefuse_pwrdm, *gfx_pwrdm, *per_pwrdm;
 static struct clockdomain *gfx_l3_clkdm, *gfx_l4ls_clkdm;
 
-static struct am33xx_padconf lp_padconf;
-static int gmii_sel;
-
-static int core_suspend_stat = -1;
 static int m3_state = M3_STATE_UNKNOWN;
 
 static int am33xx_ipc_cmd(struct a8_wkup_m3_ipc_data *);
-static int am33xx_verify_lp_state(void);
+static int am33xx_verify_lp_state(int);
 static void am33xx_m3_state_machine_reset(void);
 
 static DECLARE_COMPLETION(a8_m3_sync);
 
 static void save_padconf(void)
 {
-	lp_padconf.mii1_col	= readl(AM33XX_CTRL_REGADDR(0x0908));
-	lp_padconf.mii1_crs	= readl(AM33XX_CTRL_REGADDR(0x090c));
-	lp_padconf.mii1_rxerr	= readl(AM33XX_CTRL_REGADDR(0x0910));
-	lp_padconf.mii1_txen	= readl(AM33XX_CTRL_REGADDR(0x0914));
-	lp_padconf.mii1_rxdv	= readl(AM33XX_CTRL_REGADDR(0x0918));
-	lp_padconf.mii1_txd3	= readl(AM33XX_CTRL_REGADDR(0x091c));
-	lp_padconf.mii1_txd2	= readl(AM33XX_CTRL_REGADDR(0x0920));
-	lp_padconf.mii1_txd1	= readl(AM33XX_CTRL_REGADDR(0x0924));
-	lp_padconf.mii1_txd0	= readl(AM33XX_CTRL_REGADDR(0x0928));
-	lp_padconf.mii1_txclk	= readl(AM33XX_CTRL_REGADDR(0x092c));
-	lp_padconf.mii1_rxclk	= readl(AM33XX_CTRL_REGADDR(0x0930));
-	lp_padconf.mii1_rxd3	= readl(AM33XX_CTRL_REGADDR(0x0934));
-	lp_padconf.mii1_rxd2	= readl(AM33XX_CTRL_REGADDR(0x0938));
-	lp_padconf.mii1_rxd1	= readl(AM33XX_CTRL_REGADDR(0x093c));
-	lp_padconf.mii1_rxd0	= readl(AM33XX_CTRL_REGADDR(0x0940));
-	lp_padconf.rmii1_refclk	= readl(AM33XX_CTRL_REGADDR(0x0944));
-	lp_padconf.mdio_data	= readl(AM33XX_CTRL_REGADDR(0x0948));
-	lp_padconf.mdio_clk	= readl(AM33XX_CTRL_REGADDR(0x094c));
-	gmii_sel		= readl(AM33XX_CTRL_REGADDR(0x0650));
-	/* sdio */
-	lp_padconf.gpmc_a1	= readl(AM33XX_CTRL_REGADDR(0x0844));
-	lp_padconf.gpmc_a2	= readl(AM33XX_CTRL_REGADDR(0x0848));
-	lp_padconf.gpmc_a3	= readl(AM33XX_CTRL_REGADDR(0x084c));
-	lp_padconf.gpmc_ben1	= readl(AM33XX_CTRL_REGADDR(0x0878));
-	lp_padconf.gpmc_csn3	= readl(AM33XX_CTRL_REGADDR(0x0888));
-	lp_padconf.gpmc_clk	= readl(AM33XX_CTRL_REGADDR(0x088c));
-	/* uart1 */
-	lp_padconf.uart1_ctsn	= readl(AM33XX_CTRL_REGADDR(0x0978));
-	lp_padconf.uart1_rtsn	= readl(AM33XX_CTRL_REGADDR(0x097C));
-	lp_padconf.uart1_rxd	= readl(AM33XX_CTRL_REGADDR(0x0980));
-	lp_padconf.uart1_txd	= readl(AM33XX_CTRL_REGADDR(0x0984));
+	struct am33xx_padconf_regs *temp = am33xx_lp_padconf;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(am33xx_lp_padconf); i++, temp++)
+		temp->val = readl(AM33XX_CTRL_REGADDR(temp->offset));
 }
 
 static void restore_padconf(void)
 {
-	writel(lp_padconf.mii1_col, AM33XX_CTRL_REGADDR(0x0908));
-	writel(lp_padconf.mii1_crs, AM33XX_CTRL_REGADDR(0x090c));
-	writel(lp_padconf.mii1_rxerr, AM33XX_CTRL_REGADDR(0x0910));
-	writel(lp_padconf.mii1_txen, AM33XX_CTRL_REGADDR(0x0914));
-	writel(lp_padconf.mii1_rxdv, AM33XX_CTRL_REGADDR(0x0918));
-	writel(lp_padconf.mii1_txd3, AM33XX_CTRL_REGADDR(0x091c));
-	writel(lp_padconf.mii1_txd2, AM33XX_CTRL_REGADDR(0x0920));
-	writel(lp_padconf.mii1_txd1, AM33XX_CTRL_REGADDR(0x0924));
-	writel(lp_padconf.mii1_txd0, AM33XX_CTRL_REGADDR(0x0928));
-	writel(lp_padconf.mii1_txclk, AM33XX_CTRL_REGADDR(0x092c));
-	writel(lp_padconf.mii1_rxclk, AM33XX_CTRL_REGADDR(0x0930));
-	writel(lp_padconf.mii1_rxd3, AM33XX_CTRL_REGADDR(0x0934));
-	writel(lp_padconf.mii1_rxd2, AM33XX_CTRL_REGADDR(0x0938));
-	writel(lp_padconf.mii1_rxd1, AM33XX_CTRL_REGADDR(0x093c));
-	writel(lp_padconf.mii1_rxd0, AM33XX_CTRL_REGADDR(0x0940));
-	writel(lp_padconf.rmii1_refclk, AM33XX_CTRL_REGADDR(0x0944));
-	writel(lp_padconf.mdio_data, AM33XX_CTRL_REGADDR(0x0948));
-	writel(lp_padconf.mdio_clk, AM33XX_CTRL_REGADDR(0x094c));
-	writel(gmii_sel, AM33XX_CTRL_REGADDR(0x0650));
-	/* sdio */
-	writel(lp_padconf.gpmc_a1, AM33XX_CTRL_REGADDR(0x0844));
-	writel(lp_padconf.gpmc_a2, AM33XX_CTRL_REGADDR(0x0848));
-	writel(lp_padconf.gpmc_a3, AM33XX_CTRL_REGADDR(0x084c));
-	writel(lp_padconf.gpmc_ben1, AM33XX_CTRL_REGADDR(0x0878));
-	writel(lp_padconf.gpmc_csn3, AM33XX_CTRL_REGADDR(0x0888));
-	writel(lp_padconf.gpmc_clk, AM33XX_CTRL_REGADDR(0x088c));
-	/* Uart1 */
-	writel(lp_padconf.uart1_ctsn, AM33XX_CTRL_REGADDR(0x0978));
-	writel(lp_padconf.uart1_rtsn, AM33XX_CTRL_REGADDR(0x097C));
-	writel(lp_padconf.uart1_rxd, AM33XX_CTRL_REGADDR(0x0980));
-	writel(lp_padconf.uart1_txd, AM33XX_CTRL_REGADDR(0x0984));
+	struct am33xx_padconf_regs *temp = am33xx_lp_padconf;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(am33xx_lp_padconf); i++, temp++)
+		writel(temp->val, AM33XX_CTRL_REGADDR(temp->offset));
 }
 
 static int am33xx_pm_prepare_late(void)
@@ -161,7 +107,8 @@ static void am33xx_pm_finish(void)
 
 static int am33xx_do_sram_idle(long unsigned int state)
 {
-	am33xx_do_wfi_sram();
+	am33xx_do_wfi_sram(&suspend_cfg_param_list[0]);
+
 	return 0;
 }
 
@@ -169,17 +116,14 @@ static int am33xx_pm_suspend(void)
 {
 	int state, ret = 0;
 
-	struct omap_hwmod *cpgmac_oh, *gpmc_oh, *usb_oh;
+	struct omap_hwmod *gpmc_oh, *usb_oh;
 
-	cpgmac_oh	= omap_hwmod_lookup("cpgmac0");
 	usb_oh		= omap_hwmod_lookup("usb_otg_hs");
 	gpmc_oh		= omap_hwmod_lookup("gpmc");
 
-	omap_hwmod_enable(cpgmac_oh);
 	omap_hwmod_enable(usb_oh);
 	omap_hwmod_enable(gpmc_oh);
 
-	omap_hwmod_idle(cpgmac_oh);
 	omap_hwmod_idle(usb_oh);
 	omap_hwmod_idle(gpmc_oh);
 
@@ -214,7 +158,7 @@ static int am33xx_pm_suspend(void)
 		clkdm_wakeup(gfx_l4ls_clkdm);
 	}
 
-	core_suspend_stat = ret;
+	ret = am33xx_verify_lp_state(ret);
 
 	return ret;
 }
@@ -241,7 +185,13 @@ static int am33xx_pm_begin(suspend_state_t state)
 
 	disable_hlt();
 
-	am33xx_lp_ipc.resume_addr = DS_RESUME_ADDR;
+	/*
+	 * Populate the resume address as part of IPC data
+	 * The offset to be added comes from sleep33xx.S
+	 * Add 4 bytes to ensure that resume happens from
+	 * the word *after* the word which holds the resume offset
+	 */
+	am33xx_lp_ipc.resume_addr = (DS_RESUME_BASE + am33xx_resume_offset + 4);
 	am33xx_lp_ipc.sleep_mode  = DS_MODE;
 	am33xx_lp_ipc.ipc_data1	  = DS_IPC_DEFAULT;
 	am33xx_lp_ipc.ipc_data2   = DS_IPC_DEFAULT;
@@ -299,11 +249,7 @@ static void am33xx_m3_state_machine_reset(void)
 
 static void am33xx_pm_end(void)
 {
-	int ret;
-
 	suspend_state = PM_SUSPEND_ON;
-
-	ret = am33xx_verify_lp_state();
 
 	omap_mbox_enable_irq(m3_mbox, IRQ_RX);
 
@@ -334,7 +280,7 @@ int am33xx_ipc_cmd(struct a8_wkup_m3_ipc_data *data)
 }
 
 /* return 0 if no reset M3 needed, 1 otherwise */
-static int am33xx_verify_lp_state(void)
+static int am33xx_verify_lp_state(int core_suspend_stat)
 {
 	int status, ret = 0;
 
@@ -349,6 +295,8 @@ static int am33xx_verify_lp_state(void)
 
 	if (status == 0x0) {
 		pr_info("Successfully transitioned all domains to low power state\n");
+		if (am33xx_lp_ipc.sleep_mode == DS0_ID)
+			per_pwrdm->ret_logic_off_counter++;
 		goto clear_old_status;
 	} else if (status == 0x10000) {
 		pr_err("Could not enter low power state\n"
@@ -535,13 +483,19 @@ static int __init clkdms_setup(struct clockdomain *clkdm, void *unused)
  */
 void am33xx_push_sram_idle(void)
 {
-	am33xx_do_wfi_sram = omap_sram_push(am33xx_do_wfi, am33xx_do_wfi_sz);
+	am33xx_do_wfi_sram = (void *)omap_sram_push
+					(am33xx_do_wfi, am33xx_do_wfi_sz);
 }
 
 static int __init am33xx_pm_init(void)
 {
 	int ret;
+#ifdef CONFIG_SUSPEND
+	void __iomem *base;
+	u32 reg;
+	u32 evm_id;
 
+#endif
 	if (!cpu_is_am33xx())
 		return -ENODEV;
 
@@ -553,26 +507,53 @@ static int __init am33xx_pm_init(void)
 	pm_set_vt_switch(0);
 #endif
 
+/* Read SDRAM_CONFIG register to determine Memory Type */
+	base = am33xx_get_ram_base();
+	reg = readl(base + EMIF4_0_SDRAM_CONFIG);
+	reg = (reg & SDRAM_TYPE_MASK) >> SDRAM_TYPE_SHIFT;
+	suspend_cfg_param_list[MEMORY_TYPE] = reg;
+
+/*
+ * vtp_ctrl register value for DDR2 and DDR3 as suggested
+ * by h/w team
+ */
+	if (reg == MEM_TYPE_DDR2)
+		suspend_cfg_param_list[SUSP_VTP_CTRL_VAL] = SUSP_VTP_CTRL_DDR2;
+	else
+		suspend_cfg_param_list[SUSP_VTP_CTRL_VAL] = SUSP_VTP_CTRL_DDR3;
+
+
+	/* Get Board Id */
+	evm_id = am335x_evm_get_id();
+	if (evm_id != -EINVAL)
+		suspend_cfg_param_list[EVM_ID] = evm_id;
+	else
+		suspend_cfg_param_list[EVM_ID] = 0xff;
+
 	(void) clkdm_for_each(clkdms_setup, NULL);
 
 	/* CEFUSE domain should be turned off post bootup */
 	cefuse_pwrdm = pwrdm_lookup("cefuse_pwrdm");
 	if (cefuse_pwrdm == NULL)
-		printk(KERN_ERR "Failed to get cefuse_pwrdm\n");
+		pr_err("Failed to get cefuse_pwrdm\n");
 	else
 		pwrdm_set_next_pwrst(cefuse_pwrdm, PWRDM_POWER_OFF);
 
 	gfx_pwrdm = pwrdm_lookup("gfx_pwrdm");
 	if (gfx_pwrdm == NULL)
-		printk(KERN_ERR "Failed to get gfx_pwrdm\n");
+		pr_err("Failed to get gfx_pwrdm\n");
+
+	per_pwrdm = pwrdm_lookup("per_pwrdm");
+	if (per_pwrdm == NULL)
+		pr_err("Failed to get per_pwrdm\n");
 
 	gfx_l3_clkdm = clkdm_lookup("gfx_l3_clkdm");
 	if (gfx_l3_clkdm == NULL)
-		printk(KERN_ERR "Failed to get gfx_l3_clkdm\n");
+		pr_err("Failed to get gfx_l3_clkdm\n");
 
 	gfx_l4ls_clkdm = clkdm_lookup("gfx_l4ls_gfx_clkdm");
 	if (gfx_l4ls_clkdm == NULL)
-		printk(KERN_ERR "Failed to get gfx_l4ls_gfx_clkdm\n");
+		pr_err("Failed to get gfx_l4ls_gfx_clkdm\n");
 
 	mpu_dev = omap_device_get_by_hwmod_name("mpu");
 

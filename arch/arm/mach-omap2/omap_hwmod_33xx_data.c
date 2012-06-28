@@ -14,6 +14,11 @@
  * GNU General Public License for more details.
  */
 
+#include <linux/io.h>
+#include <linux/slab.h>
+#include <linux/err.h>
+#include <linux/errno.h>
+
 #include <plat/omap_hwmod.h>
 #include <plat/cpu.h>
 #include <plat/gpio.h>
@@ -21,11 +26,14 @@
 #include <plat/mmc.h>
 #include <plat/mcspi.h>
 #include <plat/i2c.h>
+#include <plat/clock.h>
+#include <plat/prcm.h>
 
 #include "omap_hwmod_common_data.h"
 #include "control.h"
 #include "cm33xx.h"
 #include "prm33xx.h"
+#include "common.h"
 
 /* Backward references (IPs with Bus Master capability) */
 static struct omap_hwmod am33xx_mpu_hwmod;
@@ -81,6 +89,63 @@ static struct omap_hwmod am33xx_gpmc_hwmod;
 static struct omap_hwmod am33xx_lcdc_hwmod;
 static struct omap_hwmod am33xx_mailbox_hwmod;
 static struct omap_hwmod am33xx_cpgmac0_hwmod;
+static struct omap_hwmod am33xx_mdio_hwmod;
+
+/*
+ * ERRATA: (Yet to conform from IP team)
+ * As per the observation, in order to disable the cpsw clock/module
+ * from already enabled state, module level reset assertion is
+ * required; without reset the clock/module won't enter into
+ * idle state at all.
+ * Also, as per observation (have not conformed yet), we have to
+ * assert reset signal for all cpsw (4) submodules.
+ */
+
+/* OCP SYSSTATUS bit shifts/masks */
+#define SOFT_RESETDONE_SHIFT		0
+#define SOFT_RESETDONE_MASK		(1 << SOFT_RESETDONE_SHIFT)
+
+#define MAX_MODULE_SOFTRESET_WAIT	10000
+
+static int am33xx_cpgmac_reset(struct omap_hwmod *oh)
+{
+	int i;
+	int ret = 0;
+
+	pr_debug("%s: resetting via Module SOFTRESET bit\n", oh->name);
+
+	for (i = 0; i < oh->slaves_cnt; i++) {
+		int c = 0;
+		void __iomem *va_start;
+		struct omap_hwmod_ocp_if *os;
+		struct omap_hwmod_addr_space *mem;
+
+		os = oh->slaves[i];
+		/* FIXME: Only first instance's OCP_RST is asserted */
+		mem = &os->addr[0];
+
+		va_start = ioremap(mem->pa_start, mem->pa_end - mem->pa_start);
+		if (!va_start) {
+			pr_err("%s: Could not ioremap (%x)\n",
+					oh->name, mem->pa_start);
+			ret = -ENOMEM;
+			break;
+		}
+		/* Assert reset signal */
+		writel(1, va_start + oh->class->sysc->rst_offs);
+		omap_test_timeout(((readl(va_start + oh->class->sysc->rst_offs)
+					& SOFT_RESETDONE_MASK) == 0),
+				MAX_MODULE_SOFTRESET_WAIT, c);
+
+		if (c == MAX_MODULE_SOFTRESET_WAIT) {
+			pr_warning("%s: softreset failed (waited %d usec)\n",
+					oh->name, MAX_MODULE_SOFTRESET_WAIT);
+			ret = -ETIMEDOUT;
+		}
+	}
+
+	return ret;
+}
 
 /*
  * Interconnects hwmod structures
@@ -369,11 +434,18 @@ static struct omap_hwmod_irq_info am33xx_aes0_irqs[] = {
 	{ .irq = -1 }
 };
 
+static struct omap_hwmod_dma_info am33xx_aes0_dma[] = {
+	{ .dma_req = AM33XX_DMA_AESEIP36T0_DOUT },
+	{ .dma_req = AM33XX_DMA_AESEIP36T0_DIN },
+	{ .dma_req = -1 }
+};
+
 static struct omap_hwmod am33xx_aes0_hwmod = {
 	.name		= "aes0",
 	.class		= &am33xx_aes_hwmod_class,
 	.clkdm_name	= "l3_clkdm",
 	.mpu_irqs	= am33xx_aes0_irqs,
+	.sdma_reqs	= am33xx_aes0_dma,
 	.main_clk	= "aes0_fck",
 	.prcm		= {
 		.omap4	= {
@@ -450,23 +522,32 @@ static struct omap_hwmod_class_sysconfig am33xx_cpgmac_sysc = {
 	.rev_offs	= 0x0,
 	.sysc_offs	= 0x8,
 	.syss_offs	= 0x4,
-	.sysc_flags	= (SYSC_HAS_SIDLEMODE | SYSC_HAS_MIDLEMODE |
-			SYSS_HAS_RESET_STATUS),
+	.rst_offs	= 0x8,
+	.sysc_flags	= (SYSC_HAS_SIDLEMODE | SYSC_HAS_MIDLEMODE),
 	.idlemodes	= (SIDLE_FORCE | SIDLE_NO | MSTANDBY_FORCE |
 			MSTANDBY_NO),
 	.sysc_fields	= &omap_hwmod_sysc_type3,
 };
 
 static struct omap_hwmod_class am33xx_cpgmac0_hwmod_class = {
-	.name		= "cpgmac0",
+	.name		= "cpsw",
 	.sysc		= &am33xx_cpgmac_sysc,
+	.reset		= am33xx_cpgmac_reset,
 };
 
+/* Used by driver */
 struct omap_hwmod_addr_space am33xx_cpgmac0_addr_space[] = {
+	/* cpsw ss */
+	{
+		.pa_start	= 0x4A100000,
+		.pa_end		= 0x4A100000 + SZ_2K - 1,
+		.flags		= ADDR_MAP_ON_INIT,
+	},
+	/* cpsw wr */
 	{
 		.pa_start	= 0x4A101200,
-		.pa_end		= 0x4A101200 + SZ_8K - 1,
-		.flags		= ADDR_MAP_ON_INIT | ADDR_TYPE_RT,
+		.pa_end		= 0x4A101200 + SZ_256 - 1,
+		.flags		= ADDR_TYPE_RT,
 	},
 	{ }
 };
@@ -478,14 +559,68 @@ struct omap_hwmod_ocp_if am33xx_l3_main__cpgmac0 = {
 	.user		= OCP_USER_MPU,
 };
 
+struct omap_hwmod_addr_space am33xx_cpsw_sl1_addr_space[] = {
+	/* cpsw sl1 */
+	{
+		.pa_start	= 0x4A100D84,
+		.pa_end		= 0x4A100D84 + SZ_32 - 1,
+		.flags		= ADDR_TYPE_RT,
+	},
+	{ }
+};
+
+struct omap_hwmod_ocp_if am33xx_l3_main__cpsw_sl1 = {
+	.master		= &am33xx_l3_main_hwmod,
+	.slave		= &am33xx_cpgmac0_hwmod,
+	.addr		= am33xx_cpsw_sl1_addr_space,
+	.user		= OCP_USER_MPU,
+};
+
+struct omap_hwmod_addr_space am33xx_cpsw_sl2_addr_space[] = {
+	/* cpsw sl2 */
+	{
+		.pa_start	= 0x4A100DC4,
+		.pa_end		= 0x4A100DC4 + SZ_32 - 1,
+		.flags		= ADDR_TYPE_RT,
+	},
+	{ }
+};
+
+struct omap_hwmod_ocp_if am33xx_l3_main__cpsw_sl2 = {
+	.master		= &am33xx_l3_main_hwmod,
+	.slave		= &am33xx_cpgmac0_hwmod,
+	.addr		= am33xx_cpsw_sl2_addr_space,
+	.user		= OCP_USER_MPU,
+};
+
+struct omap_hwmod_addr_space am33xx_cpsw_cpdma_addr_space[] = {
+	/* cpsw cpdma */
+	{
+		.pa_start	= 0x4A100814,
+		.pa_end		= 0x4A100814 + SZ_32 - 1,
+		.flags		= ADDR_TYPE_RT,
+	},
+	{ }
+};
+
+struct omap_hwmod_ocp_if am33xx_l3_main__cpsw_cpdma = {
+	.master		= &am33xx_l3_main_hwmod,
+	.slave		= &am33xx_cpgmac0_hwmod,
+	.addr		= am33xx_cpsw_cpdma_addr_space,
+	.user		= OCP_USER_MPU,
+};
+
 static struct omap_hwmod_ocp_if *am33xx_cpgmac0_slaves[] = {
 	&am33xx_l3_main__cpgmac0,
+	&am33xx_l3_main__cpsw_sl1,
+	&am33xx_l3_main__cpsw_sl2,
+	&am33xx_l3_main__cpsw_cpdma,
 };
 
 static struct omap_hwmod_irq_info am33xx_cpgmac0_irqs[] = {
 	{ .name = "c0_rx_thresh_pend", .irq = 40 },
-	{ .name = "c0_rx_pend", .irq = 41 },
-	{ .name = "c0_tx_pend", .irq = 42 },
+	{ .name = "c0_rx_pend", .irq = 93 },
+	{ .name = "c0_tx_pend", .irq = 94 },
 	{ .name = "c0_misc_pend", .irq = 43 },
 	{ .irq = -1 }
 };
@@ -505,7 +640,41 @@ static struct omap_hwmod am33xx_cpgmac0_hwmod = {
 	.slaves		= am33xx_cpgmac0_slaves,
 	.slaves_cnt	= ARRAY_SIZE(am33xx_cpgmac0_slaves),
 	.flags		= (HWMOD_SWSUP_SIDLE | HWMOD_SWSUP_MSTANDBY |
-				HWMOD_INIT_NO_IDLE | HWMOD_INIT_NO_RESET),
+				HWMOD_SWSUP_RESET_BEFORE_IDLE),
+};
+
+/* mdio class */
+static struct omap_hwmod_class am33xx_mdio_hwmod_class = {
+	.name		= "davinci_mdio",
+};
+
+struct omap_hwmod_addr_space am33xx_mdio_addr_space[] = {
+	{
+		.pa_start	= 0x4A101000,
+		.pa_end		= 0x4A101000 + SZ_256 - 1,
+		.flags		= ADDR_MAP_ON_INIT,
+	},
+	{ }
+};
+
+struct omap_hwmod_ocp_if am33xx_cpgmac0__mdio = {
+	.master		= &am33xx_cpgmac0_hwmod,
+	.slave		= &am33xx_mdio_hwmod,
+	.addr		= am33xx_mdio_addr_space,
+	.user		= OCP_USER_MPU,
+};
+
+static struct omap_hwmod_ocp_if *am33xx_mdio_slaves[] = {
+	&am33xx_cpgmac0__mdio,
+};
+
+static struct omap_hwmod am33xx_mdio_hwmod = {
+	.name		= "mdio",
+	.class		= &am33xx_mdio_hwmod_class,
+	.clkdm_name	= "cpsw_125mhz_clkdm",
+	.main_clk	= "cpgmac0_ick",
+	.slaves		= am33xx_mdio_slaves,
+	.slaves_cnt	= ARRAY_SIZE(am33xx_mdio_slaves),
 };
 
 /* 'dcan' class */
@@ -1054,7 +1223,7 @@ static struct omap_hwmod am33xx_gpio0_hwmod = {
 	.clkdm_name	= "l4_wkup_clkdm",
 	.mpu_irqs	= am33xx_gpio0_irqs,
 	.main_clk	= "gpio0_ick",
-	.flags		= HWMOD_CONTROL_OPT_CLKS_IN_RESET,
+	.flags		= HWMOD_CONTROL_OPT_CLKS_IN_RESET | HWMOD_INIT_NO_RESET,
 	.prcm		= {
 		.omap4	= {
 			.clkctrl_offs	= AM33XX_CM_WKUP_GPIO0_CLKCTRL_OFFSET,
@@ -2003,8 +2172,13 @@ static struct omap_hwmod_class am33xx_sha0_hwmod_class = {
 };
 
 static struct omap_hwmod_irq_info am33xx_sha0_irqs[] = {
-	{ .irq = 108 },
+	{ .irq = AM33XX_IRQ_SHAEIP57t0_P },
 	{ .irq = -1 }
+};
+
+static struct omap_hwmod_dma_info am33xx_sha0_dma[] = {
+	{ .dma_req = AM33XX_DMA_SHAEIP57T0_DIN },
+	{ .dma_req = -1 }
 };
 
 static struct omap_hwmod am33xx_sha0_hwmod = {
@@ -2012,6 +2186,7 @@ static struct omap_hwmod am33xx_sha0_hwmod = {
 	.class		= &am33xx_sha0_hwmod_class,
 	.clkdm_name	= "l3_clkdm",
 	.mpu_irqs	= am33xx_sha0_irqs,
+	.sdma_reqs	= am33xx_sha0_dma,
 	.main_clk	= "sha0_fck",
 	.prcm		= {
 		.omap4	= {
@@ -3149,6 +3324,7 @@ static struct omap_hwmod am33xx_wkup_m3_hwmod = {
 		.omap4	= {
 			.clkctrl_offs	= AM33XX_CM_WKUP_WKUP_M3_CLKCTRL_OFFSET,
 			.rstctrl_offs	= AM33XX_RM_WKUP_RSTCTRL_OFFSET,
+			.rstst_offs	= AM33XX_RM_WKUP_RSTST_OFFSET,
 			.modulemode	= MODULEMODE_SWCTRL,
 		},
 	},
@@ -3240,7 +3416,7 @@ static struct omap_hwmod_class am33xx_gfx_hwmod_class = {
 };
 
 static struct omap_hwmod_rst_info am33xx_gfx_resets[] = {
-	{ .name = "gfx", .rst_shift = 0 },
+	{ .name = "gfx", .rst_shift = 0, .st_shift = 0 },
 };
 
 static struct omap_hwmod am33xx_gfx_hwmod = {
@@ -3252,6 +3428,7 @@ static struct omap_hwmod am33xx_gfx_hwmod = {
 		.omap4	= {
 			.clkctrl_offs	= AM33XX_CM_GFX_GFX_CLKCTRL_OFFSET,
 			.rstctrl_offs	= AM33XX_RM_GFX_RSTCTRL_OFFSET,
+			.rstst_offs	= AM33XX_RM_GFX_RSTST_OFFSET,
 			.modulemode	= MODULEMODE_SWCTRL,
 		},
 	},
@@ -3278,6 +3455,7 @@ static struct omap_hwmod am33xx_pruss_hwmod = {
 		.omap4	= {
 			.clkctrl_offs	= AM33XX_CM_PER_PRUSS_CLKCTRL_OFFSET,
 			.rstctrl_offs	= AM33XX_RM_PER_RSTCTRL_OFFSET,
+			.rstst_offs	= AM33XX_RM_PER_RSTST_OFFSET,
 			.modulemode	= MODULEMODE_SWCTRL,
 		},
 	},
@@ -3391,6 +3569,8 @@ static __initdata struct omap_hwmod *am33xx_hwmods[] = {
 	&am33xx_usbss_hwmod,
 	/* cpgmac0 class */
 	&am33xx_cpgmac0_hwmod,
+	/* mdio class */
+	&am33xx_mdio_hwmod,
 	/* tptc class */
 	&am33xx_tptc0_hwmod,
 	&am33xx_tptc1_hwmod,

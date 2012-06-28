@@ -467,6 +467,7 @@ int __devinit cppi41_init(u8 id, u8 irq, int num_instances)
 	cppi_info->tx_comp_q = id ? tx_comp_q1 : tx_comp_q;
 	cppi_info->rx_comp_q = id ? rx_comp_q1 : rx_comp_q;
 	cppi_info->bd_intr_ctrl = 1;
+	cppi_info->version = usbss_read(USBSS_REVISION);
 
 	if (cppi41_init_done)
 		return 0;
@@ -567,7 +568,6 @@ int cppi41_enable_sched_rx(void)
 	cppi41_dma_sched_tbl_init(0, 0, dma_sched_table, 30);
 	return 0;
 }
-#endif /* CONFIG_USB_TI_CPPI41_DMA */
 
 /*
  * Because we don't set CTRL.UINT, it's "important" to:
@@ -575,6 +575,33 @@ int cppi41_enable_sched_rx(void)
  *	  initial setup, as a workaround);
  *	- use INTSET/INTCLR instead.
  */
+
+void txfifoempty_intr_enable(struct musb *musb, u8 ep_num)
+{
+	void __iomem *reg_base = musb->ctrl_base;
+	u32 coremask;
+
+	if (musb->txfifo_intr_enable) {
+		coremask = musb_readl(reg_base, USB_CORE_INTR_SET_REG);
+		coremask |= (1 << (ep_num + 16));
+		musb_writel(reg_base, USB_CORE_INTR_SET_REG, coremask);
+		dev_dbg(musb->controller, "enable txF intr ep%d coremask %x\n",
+			ep_num, coremask);
+	}
+}
+
+void txfifoempty_intr_disable(struct musb *musb, u8 ep_num)
+{
+	void __iomem *reg_base = musb->ctrl_base;
+	u32 coremask;
+
+	if (musb->txfifo_intr_enable) {
+		coremask = (1 << (ep_num + 16));
+		musb_writel(reg_base, USB_CORE_INTR_CLEAR_REG, coremask);
+	}
+}
+
+#endif /* CONFIG_USB_TI_CPPI41_DMA */
 
 /**
  * ti81xx_musb_enable - enable interrupts
@@ -681,6 +708,12 @@ static void otg_timer(unsigned long _musb)
 		devctl = musb_readb(mregs, MUSB_DEVCTL);
 		if (devctl & MUSB_DEVCTL_HM) {
 			musb->xceiv->state = OTG_STATE_A_IDLE;
+		} else if ((devctl & MUSB_DEVCTL_SESSION) &&
+				!(devctl & MUSB_DEVCTL_BDEVICE)) {
+			mod_timer(&musb->otg_workaround,
+					jiffies + POLL_SECONDS * HZ);
+			musb_writeb(musb->mregs, MUSB_DEVCTL, devctl &
+				~MUSB_DEVCTL_SESSION);
 		} else {
 			mod_timer(&musb->otg_workaround,
 					jiffies + POLL_SECONDS * HZ);
@@ -812,8 +845,7 @@ int musb_simulate_babble(struct musb *musb)
 	mdelay(100);
 
 	/* generate s/w babble interrupt */
-	musb_writel(reg_base, USB_IRQ_STATUS_RAW_1,
-		MUSB_INTR_BABBLE);
+	musb_writel(reg_base, USB_IRQ_STATUS_RAW_1, MUSB_INTR_BABBLE);
 	return 0;
 }
 EXPORT_SYMBOL(musb_simulate_babble);
@@ -827,7 +859,8 @@ void musb_babble_workaround(struct musb *musb)
 
 	/* Reset the controller */
 	musb_writel(reg_base, USB_CTRL_REG, USB_SOFT_RESET_MASK);
-	udelay(100);
+	while ((musb_readl(reg_base, USB_CTRL_REG) & 0x1))
+		cpu_relax();
 
 	/* Shutdown the on-chip PHY and its PLL. */
 	if (data->set_phy_power)
@@ -842,9 +875,8 @@ void musb_babble_workaround(struct musb *musb)
 		data->set_phy_power(musb->id, 1);
 	mdelay(100);
 
-	/* save the usbotgss register contents */
-	musb_platform_enable(musb);
-
+	/* re-setup the endpoint fifo addresses */
+	ep_config_from_table(musb);
 	musb_start(musb);
 }
 
@@ -889,6 +921,18 @@ static irqreturn_t ti81xx_interrupt(int irq, void *hci)
 	musb->int_usb =	(usbintr & USB_INTR_USB_MASK) >> USB_INTR_USB_SHIFT;
 
 	dev_dbg(musb->controller, "usbintr (%x) epintr(%x)\n", usbintr, epintr);
+
+	if (musb->txfifo_intr_enable && (usbintr & USB_INTR_TXFIFO_MASK)) {
+#ifdef CONFIG_USB_TI_CPPI41_DMA
+		dev_dbg(musb->controller,
+			"TxFIFOIntr %x\n", usbintr >> USB_INTR_TXFIFO_EMPTY);
+		cppi41_handle_txfifo_intr(musb,
+				usbintr >> USB_INTR_TXFIFO_EMPTY);
+		ret = IRQ_HANDLED;
+#endif
+	}
+	usbintr &= ~USB_INTR_TXFIFO_MASK;
+
 	/*
 	 * DRVVBUS IRQs are the only proxy we have (a very poor one!) for
 	 * AM3517's missing ID change IRQ.  We need an ID change IRQ to
@@ -938,11 +982,21 @@ static irqreturn_t ti81xx_interrupt(int irq, void *hci)
 						jiffies + POLL_SECONDS * HZ);
 			WARNING("VBUS error workaround (delay coming)\n");
 		} else if (is_host_enabled(musb) && drvvbus) {
-			musb->is_active = 1;
-			MUSB_HST_MODE(musb);
-			musb->xceiv->default_a = 1;
-			musb->xceiv->state = OTG_STATE_A_WAIT_VRISE;
-			del_timer(&musb->otg_workaround);
+			if ((devctl & MUSB_DEVCTL_SESSION) &&
+				!(devctl & MUSB_DEVCTL_BDEVICE) &&
+				!(devctl & MUSB_DEVCTL_HM)) {
+				dev_dbg(musb->controller,
+					"Only micro-A plug is connected\n");
+			} else {
+				if (musb->is_active)
+					del_timer(&musb->otg_workaround);
+				else
+					musb->is_active = 1;
+
+				MUSB_HST_MODE(musb);
+				musb->xceiv->default_a = 1;
+				musb->xceiv->state = OTG_STATE_A_WAIT_VRISE;
+			}
 		} else {
 			musb->is_active = 0;
 			MUSB_DEV_MODE(musb);
@@ -1069,6 +1123,8 @@ int ti81xx_musb_init(struct musb *musb)
 	if (!rev)
 		return -ENODEV;
 
+	pr_info("MUSB%d controller's USBSS revision = %08x\n", musb->id, rev);
+
 	if (is_host_enabled(musb))
 		setup_timer(&musb->otg_workaround, otg_timer,
 					(unsigned long) musb);
@@ -1106,6 +1162,13 @@ int ti81xx_musb_init(struct musb *musb)
 	/* set musb controller to host mode */
 	musb_platform_set_mode(musb, mode);
 
+#ifdef CONFIG_USB_TI_CPPI41_DMA
+	musb->txfifo_intr_enable = 1;
+	if (musb->txfifo_intr_enable)
+		printk(KERN_DEBUG "TxFifo Empty intr enabled\n");
+	else
+		printk(KERN_DEBUG "TxFifo Empty intr disabled\n");
+#endif
 	/* enable babble workaround */
 	INIT_WORK(&musb->work, evm_deferred_musb_restart);
 	musb->enable_babble_work = 0;
@@ -1182,6 +1245,10 @@ static struct musb_platform_ops ti81xx_ops = {
 	.dma_controller_create	= cppi41_dma_controller_create,
 	.dma_controller_destroy	= cppi41_dma_controller_destroy,
 	.simulate_babble_intr	= musb_simulate_babble,
+#ifdef CONFIG_USB_TI_CPPI41_DMA
+	.txfifoempty_intr_enable = txfifoempty_intr_enable,
+	.txfifoempty_intr_disable = txfifoempty_intr_disable,
+#endif
 };
 
 static void __devexit ti81xx_delete_musb_pdev(struct ti81xx_glue *glue, u8 id)
@@ -1438,7 +1505,7 @@ static void ti81xx_save_context(struct ti81xx_glue *glue)
 			musb->en_otgw_timer = 1;
 		}
 
-		if (timer_pending(&musb->otg_workaround) &&
+		if (timer_pending(&musb->otg_timer) &&
 					is_otg_enabled(musb)) {
 			del_timer_sync(&musb->otg_timer);
 			musb->en_otg_timer = 1;

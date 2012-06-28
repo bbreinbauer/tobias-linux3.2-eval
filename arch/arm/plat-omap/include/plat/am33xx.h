@@ -43,6 +43,9 @@
 #define AM33XX_TSC_BASE		0x44E0D000
 #define AM33XX_RTC_BASE		0x44E3E000
 
+#define AM33XX_SR0_BASE         0x44E37000
+#define AM33XX_SR1_BASE         0x44E39000
+
 #define AM33XX_ASP0_BASE	0x48038000
 #define AM33XX_ASP1_BASE	0x4803C000
 
@@ -65,6 +68,17 @@
 
 #define AM33XX_ELM_BASE		0x48080000
 
+/* Base address for crypto modules */
+#define AM33XX_SHA1MD5_S_BASE	0x53000000
+#define AM33XX_SHA1MD5_P_BASE	0x53100000
+
+#define	AM33XX_AES0_S_BASE	0x53400000
+#define	AM33XX_AES0_P_BASE	0x53500000
+#define	AM33XX_AES1_S_BASE	0x53600000
+#define	AM33XX_AES1_P_BASE	0x53700000
+
+#define	AM33XX_RNG_BASE		0x48310000
+
 #define AM33XX_ASP0_BASE	0x48038000
 #define AM33XX_ASP1_BASE	0x4803C000
 
@@ -78,5 +92,20 @@
 #define AM33XX_EPWMSS0_BASE	0x48300000
 #define AM33XX_EPWMSS1_BASE	0x48302000
 #define AM33XX_EPWMSS2_BASE	0x48304000
+
+/*
+ * ----------------------------------------------------------------------------
+ * CPSW
+ * ----------------------------------------------------------------------------
+ */
+#ifndef __ASSEMBLER__
+enum am33xx_cpsw_mac_mode {
+	AM33XX_CPSW_MODE_MII,
+	AM33XX_CPSW_MODE_RMII,
+	AM33XX_CPSW_MODE_RGMII,
+};
+int am33xx_cpsw_init(enum am33xx_cpsw_mac_mode mode, unsigned char *phy_id0,
+		     unsigned char *phy_id1);
+#endif
 
 #endif /* __ASM_ARCH_AM33XX_H */
