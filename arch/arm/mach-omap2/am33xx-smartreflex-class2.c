@@ -62,7 +62,7 @@ static inline u32 sr_read_reg(struct am33xx_sr *sr, int offset, u32 srid)
 
 static void cal_reciprocal(u32 sensor, u32 *sengain, u32 *rnsen) {
          u32 gn, rn, mul;
- 
+
          for (gn = 0; gn < GAIN_MAXLIMIT; gn++) {
                  mul = 1 << (gn + 8);
                  rn = mul / sensor;
@@ -72,15 +72,15 @@ static void cal_reciprocal(u32 sensor, u32 *sengain, u32 *rnsen) {
                  }
          }
 }
- 
+
 static u32 cal_test_nvalue(u32 sennval, u32 senpval) {
          u32 senpgain=0, senngain=0;
          u32 rnsenp=0, rnsenn=0;
- 
+
          /* Calculating the gain and reciprocal of the SenN and SenP values */
          cal_reciprocal(senpval, &senpgain, &rnsenp);
          cal_reciprocal(sennval, &senngain, &rnsenn);
- 
+
          return (senpgain << NVALUERECIPROCAL_SENPGAIN_SHIFT) |
                  (senngain << NVALUERECIPROCAL_SENNGAIN_SHIFT) |
                  (rnsenp << NVALUERECIPROCAL_RNSENP_SHIFT) |
@@ -93,29 +93,29 @@ static unsigned int sr_adjust_efuse_nvalue(unsigned int opp_no,
          unsigned int new_opp_nvalue;
          unsigned int senp_gain, senn_gain, rnsenp, rnsenn, pnt_delta, nnt_delta;
          unsigned int new_senn, new_senp, senn, senp;
- 
+
          /* calculate SenN and SenP from the efuse value */
          senp_gain = ((orig_opp_nvalue >> 20) & 0xf);
          senn_gain = ((orig_opp_nvalue >> 16) & 0xf);
          rnsenp = ((orig_opp_nvalue >> 8) & 0xff);
          rnsenn = (orig_opp_nvalue & 0xff);
- 
+
          senp = ((1<<(senp_gain+8))/(rnsenp));
          senn = ((1<<(senn_gain+8))/(rnsenn));
- 
+
          /* calculate the voltage delta */
          pnt_delta = (26 * mv_delta)/10;
          nnt_delta = (3 * mv_delta);
- 
+
          /* now lets add the voltage delta to the sensor values */
          new_senn = senn + nnt_delta;
          new_senp = senp + pnt_delta;
- 
+
          new_opp_nvalue = cal_test_nvalue(new_senn, new_senp);
- 
+
          printk("Compensating OPP%d for %dmV Orig nvalue:0x%x New nvalue:0x%x \n",
                          opp_no, mv_delta, orig_opp_nvalue, new_opp_nvalue);
- 
+
          return new_opp_nvalue;
 }
 
@@ -123,7 +123,7 @@ static unsigned int sr_adjust_efuse_nvalue(unsigned int opp_no,
  * @work:	pointer to work_struct embedded in am33xx_sr_sensor struct
  *
  * While servicing the IRQ, this function is added to the delayed work queue.
- * This gives time for the voltage change to settle before we re-enable 
+ * This gives time for the voltage change to settle before we re-enable
  * the interrupt.
  */
 static void irq_sr_reenable(struct work_struct *work)
@@ -132,7 +132,7 @@ static void irq_sr_reenable(struct work_struct *work)
 	struct am33xx_sr_sensor *sens;
         struct am33xx_sr *sr;
 
-        sens = container_of((void *)work, struct am33xx_sr_sensor, 
+        sens = container_of((void *)work, struct am33xx_sr_sensor,
                 work_reenable);
 
         srid = sens->sr_id;
@@ -212,7 +212,7 @@ static void set_voltage(struct work_struct *work)
                 prev_volt = regulator_get_voltage(sr->sen[i].reg);
 
                 if (prev_volt < 0) {
-                        dev_err(&sr->pdev->dev, 
+                        dev_err(&sr->pdev->dev,
                                 "%s: SR %d: regulator_get_voltage error %d\n",
                                 __func__, i, prev_volt);
 
@@ -223,27 +223,27 @@ static void set_voltage(struct work_struct *work)
                 new_volt = prev_volt + delta_v;
 
                 /* this is the primary output for debugging SR activity */
-                dev_dbg(&sr->pdev->dev, 
+                dev_dbg(&sr->pdev->dev,
                         "%s: SR %d: prev volt=%d, delta_v=%d, req_volt=%d\n",
                          __func__, i, prev_volt, delta_v, new_volt);
-         
+
 	        /* Clear the counter, SR module disable */
 	        sr_modify_reg(sr, SRCONFIG, SRCONFIG_SRENABLE,
 			~SRCONFIG_SRENABLE, i);
 
                 if (delta_v != 0) {
-	                ret = regulator_set_voltage(sr->sen[i].reg, new_volt, 
+	                ret = regulator_set_voltage(sr->sen[i].reg, new_volt,
                                 new_volt + sr->uvoltage_step_size);
 
                         if (ret < 0)
-                                dev_err(&sr->pdev->dev, 
-                                "%s: regulator_set_voltage failed! (err %d)\n", 
+                                dev_err(&sr->pdev->dev,
+                                "%s: regulator_set_voltage failed! (err %d)\n",
                                 __func__, ret);
                 }
 reenable:
-                /* allow time for voltage to settle before re-enabling SR 
-                   module and interrupt */        
-                schedule_delayed_work(&sr->sen[i].work_reenable, 
+                /* allow time for voltage to settle before re-enabling SR
+                   module and interrupt */
+                schedule_delayed_work(&sr->sen[i].work_reenable,
                         msecs_to_jiffies(sr->irq_delay));
         }
 }
@@ -291,7 +291,7 @@ static irqreturn_t sr_class2_irq(int irq, void *data)
            silicon, which may have been related to insufficient voltage
            settling time for OPP change.  This additional delay avoids the
            crash. */
-        schedule_delayed_work(&sr->work, 
+        schedule_delayed_work(&sr->work,
                         msecs_to_jiffies(250));
 
 	return IRQ_HANDLED;
@@ -330,16 +330,16 @@ static inline int sr_set_nvalues(struct am33xx_sr *sr, u32 srid)
                         return -EINVAL;
 
                 /* adjust nTarget based on margin in mv */
-                sens->opp_data[i].adj_nvalue = sr_adjust_efuse_nvalue(i, 
-                        sens->opp_data[i].nvalue, 
+                sens->opp_data[i].adj_nvalue = sr_adjust_efuse_nvalue(i,
+                        sens->opp_data[i].nvalue,
                         sens->opp_data[i].margin);
 
-                dev_dbg(&sr->pdev->dev, 
-                        "NValueReciprocal value (from efuse) = %08x\n", 
+                dev_dbg(&sr->pdev->dev,
+                        "NValueReciprocal value (from efuse) = %08x\n",
                         sens->opp_data[i].nvalue);
 
-                dev_dbg(&sr->pdev->dev, 
-                        "Adjusted NValueReciprocal value = %08x\n", 
+                dev_dbg(&sr->pdev->dev,
+                        "Adjusted NValueReciprocal value = %08x\n",
                         sens->opp_data[i].adj_nvalue);
         }
 	return 0;
@@ -369,11 +369,11 @@ static void sr_configure(struct am33xx_sr *sr, u32 srid)
 	/* Configuring the Error Generator */
 	sr_modify_reg(sr, ERRCONFIG_V2, (SR_ERRWEIGHT_MASK |
 		SR_ERRMAXLIMIT_MASK | SR_ERRMINLIMIT_MASK),
-		((sens->opp_data[sens->curr_opp].err_weight << 
+		((sens->opp_data[sens->curr_opp].err_weight <<
                         ERRCONFIG_ERRWEIGHT_SHIFT) |
-		(sens->opp_data[sens->curr_opp].err_maxlimit << 
+		(sens->opp_data[sens->curr_opp].err_maxlimit <<
                         ERRCONFIG_ERRMAXLIMIT_SHIFT) |
-		(sens->opp_data[sens->curr_opp].err_minlimit <<          
+		(sens->opp_data[sens->curr_opp].err_minlimit <<
                         ERRCONFIG_ERRMINLIMIT_SHIFT)),
 		srid);
 }
@@ -396,11 +396,11 @@ static void sr_enable(struct am33xx_sr *sr, u32 srid)
 		return;
 
 	if (sens->opp_data[sens->curr_opp].nvalue == 0)
-		dev_err(&sr->pdev->dev, 
+		dev_err(&sr->pdev->dev,
                         "%s: OPP doesn't support SmartReflex\n", __func__);
 
 	/* Writing the nReciprocal value to the register */
-	sr_write_reg(sr, NVALUERECIPROCAL, 
+	sr_write_reg(sr, NVALUERECIPROCAL,
                 sens->opp_data[sens->curr_opp].adj_nvalue, srid);
 
 	/* Enable the interrupt */
@@ -439,7 +439,7 @@ static void sr_start_vddautocomp(struct am33xx_sr *sr)
 {
 	int i;
 
-	if ((sr->sen[SR_CORE].opp_data[0].nvalue == 0) || 
+	if ((sr->sen[SR_CORE].opp_data[0].nvalue == 0) ||
                 (sr->sen[SR_MPU].opp_data[0].nvalue == 0)) {
 		dev_err(&sr->pdev->dev, "SR module not enabled, nTarget"
 					" values are not found\n");
@@ -455,7 +455,7 @@ static void sr_start_vddautocomp(struct am33xx_sr *sr)
                	/* Read current regulator value and voltage */
 	        sr->sen[i].init_volt_mv = regulator_get_voltage(sr->sen[i].reg);
 
-                dev_dbg(&sr->pdev->dev, "%s: regulator %d, init_volt = %d\n", 
+                dev_dbg(&sr->pdev->dev, "%s: regulator %d, init_volt = %d\n",
                         __func__, i, sr->sen[i].init_volt_mv);
 
 		if (sr_clk_enable(sr, i))
@@ -484,14 +484,14 @@ static void sr_stop_vddautocomp(struct am33xx_sr *sr)
 
         /* cancel bottom half interrupt handlers that haven't run yet */
 	cancel_delayed_work_sync(&sr->work);
-	
+
 	for (i = 0; i < sr->no_of_sens; i++) {
                 /* cancel any outstanding SR IRQ re-enables on work queue */
                 cancel_delayed_work_sync(&sr->sen[i].work_reenable);
 		sr_disable(sr, i);
 		sr_clk_disable(sr, i);
 	}
-	
+
 	sr->autocomp_active = 0;
 }
 
@@ -522,23 +522,23 @@ static int am33xx_sr_margin_show(void *data, u64 *val)
 
 static int am33xx_sr_margin_update(void *data, u64 val)
 {
-        struct am33xx_sr_opp_data *sr_opp_data = 
+        struct am33xx_sr_opp_data *sr_opp_data =
                 (struct am33xx_sr_opp_data *)data;
         struct am33xx_sr_sensor *sr_sensor;
         struct am33xx_sr *sr_info;
 
         /* work back to the sr_info pointer */
-        sr_sensor = container_of((void *)sr_opp_data, struct am33xx_sr_sensor, 
-                opp_data[sr_opp_data->opp_id]); 
+        sr_sensor = container_of((void *)sr_opp_data, struct am33xx_sr_sensor,
+                opp_data[sr_opp_data->opp_id]);
 
-        sr_info = container_of((void *)sr_sensor, struct am33xx_sr, 
+        sr_info = container_of((void *)sr_sensor, struct am33xx_sr,
                 sen[sr_sensor->sr_id]);
 
         /* store the value of margin */
         sr_opp_data->margin = (s32)val;
 
         dev_warn(&sr_info->pdev->dev, "%s: new margin=%d, srid=%d, opp=%d\n",
-                __func__, sr_opp_data->margin, sr_sensor->sr_id, 
+                __func__, sr_opp_data->margin, sr_sensor->sr_id,
                 sr_opp_data->opp_id);
 
         /* updata ntarget values based upon new margin */
@@ -647,31 +647,31 @@ static int sr_debugfs_entries(struct am33xx_sr *sr_info)
 				&sens->init_volt_mv);
 	        (void)debugfs_create_file("current_voltage", S_IRUGO, sen_dir,
 				(void *)sens, &curr_volt_fops);
-		
+
                 for (j = 0; j < sr_info->sen[i].no_of_opps; j++) {
                         char tmp[20];
 
                         sprintf(&tmp[0], "opp%d", j);
                         opp_dir = debugfs_create_dir(tmp, sen_dir);
                         if (IS_ERR(opp_dir)) {
-        			dev_err(&sr_info->pdev->dev, 
-                                        "%s: Unable to create debugfs directory\n", 
+        			dev_err(&sr_info->pdev->dev,
+                                        "%s: Unable to create debugfs directory\n",
                                         __func__);
         			return PTR_ERR(opp_dir);
         		}
 
                         (void)debugfs_create_file("margin", S_IRUGO | S_IWUGO,
-	        	       opp_dir, (void *)&sens->opp_data[j], 
+	        	       opp_dir, (void *)&sens->opp_data[j],
                                &margin_fops);
-                        (void)debugfs_create_x32("err2voltgain", 
+                        (void)debugfs_create_x32("err2voltgain",
                                S_IRUGO | S_IWUGO,
-        		       opp_dir, 
+        		       opp_dir,
                                &sens->opp_data[j].e2v_gain);
         		(void)debugfs_create_x32("nvalue", S_IRUGO,
-        		       opp_dir, 
+        		       opp_dir,
                                &sens->opp_data[j].nvalue);
                         (void)debugfs_create_x32("adj_nvalue", S_IRUGO,
-        		       opp_dir, 
+        		       opp_dir,
                                &sens->opp_data[j].adj_nvalue);
                 }
 	}
@@ -713,12 +713,12 @@ static int am33xx_sr_cpufreq_transition(struct notifier_block *nb,
                 sr_stop_vddautocomp(sr);
 	} else if (val == CPUFREQ_POSTCHANGE) {
                 cpu = (struct cpufreq_freqs *)data;
-                dev_dbg(&sr->pdev->dev, 
-                        "%s: postchange, cpu=%d, old=%d, new=%d\n", 
+                dev_dbg(&sr->pdev->dev,
+                        "%s: postchange, cpu=%d, old=%d, new=%d\n",
                         __func__, cpu->cpu, cpu->old, cpu->new);
 
                 /* update current OPP */
-                sr->sen[SR_MPU].curr_opp = get_current_opp(sr, SR_MPU, 
+                sr->sen[SR_MPU].curr_opp = get_current_opp(sr, SR_MPU,
                         cpu->new*1000);
                 if (sr->sen[SR_MPU].curr_opp == -EINVAL) {
                         dev_err(&sr->pdev->dev, "%s: cannot determine opp\n",
@@ -726,10 +726,10 @@ static int am33xx_sr_cpufreq_transition(struct notifier_block *nb,
                         return -EINVAL;
                 }
 
-                dev_dbg(&sr->pdev->dev, "%s: postchange, new opp=%d\n", 
+                dev_dbg(&sr->pdev->dev, "%s: postchange, new opp=%d\n",
                         __func__, sr->sen[SR_MPU].curr_opp);
 
-                /* this handles the case when the user has disabled SR via 
+                /* this handles the case when the user has disabled SR via
                    debugfs, therefore we do not want to enable SR */
                 if (sr->disabled_by_user == 0)
                         sr_start_vddautocomp(sr);
@@ -763,6 +763,12 @@ static int __init am33xx_sr_probe(struct platform_device *pdev)
 	int ret;
 	int i,j;
 
+	if (omap_rev() != AM335X_REV_ES1_0) {
+		dev_err(&pdev->dev, "%s: Smartreflex requires ES 1.0\n",
+		       	__func__);
+		return -EINVAL;
+	}
+
 	sr_info = kzalloc(sizeof(struct am33xx_sr), GFP_KERNEL);
 	if (!sr_info) {
 		dev_err(&pdev->dev, "%s: unable to allocate sr_info\n",
@@ -787,7 +793,7 @@ static int __init am33xx_sr_probe(struct platform_device *pdev)
 	sr_info->uvoltage_step_size = pdata->vstep_size_uv;
 	sr_info->autocomp_active = false;
         sr_info->disabled_by_user = false;
-        	
+
 	for (i = 0; i < sr_info->no_of_sens; i++) {
                 u32 curr_freq=0;
 
@@ -795,52 +801,52 @@ static int __init am33xx_sr_probe(struct platform_device *pdev)
 
                 /* this should be determined from voltdm or opp layer, but
                    those approaches are not working */
-                sr_info->sen[i].no_of_opps = pdata->sr_sdata[i].no_of_opps;  
+                sr_info->sen[i].no_of_opps = pdata->sr_sdata[i].no_of_opps;
                 sr_info->sen[i].sr_id = i;
 
                 /* Reading per OPP Values */
                 for (j = 0; j < sr_info->sen[i].no_of_opps; j++) {
-        		sr_info->sen[i].opp_data[j].efuse_offs = 
+        		sr_info->sen[i].opp_data[j].efuse_offs =
                                 pdata->sr_sdata[i].sr_opp_data[j].efuse_offs;
-                        sr_info->sen[i].opp_data[j].e2v_gain = 
+                        sr_info->sen[i].opp_data[j].e2v_gain =
                                 pdata->sr_sdata[i].sr_opp_data[j].e2v_gain;
-        		sr_info->sen[i].opp_data[j].err_weight = 
+        		sr_info->sen[i].opp_data[j].err_weight =
                                 pdata->sr_sdata[i].sr_opp_data[j].err_weight;
-        		sr_info->sen[i].opp_data[j].err_minlimit = 
+        		sr_info->sen[i].opp_data[j].err_minlimit =
                                 pdata->sr_sdata[i].sr_opp_data[j].err_minlimit;
-        		sr_info->sen[i].opp_data[j].err_maxlimit = 
-                                pdata->sr_sdata[i].sr_opp_data[j].err_maxlimit;	  
-                        sr_info->sen[i].opp_data[j].margin = 
-                                pdata->sr_sdata[i].sr_opp_data[j].margin; 
-                        sr_info->sen[i].opp_data[j].nominal_volt = 
-                                pdata->sr_sdata[i].sr_opp_data[j].nominal_volt; 
-                        sr_info->sen[i].opp_data[j].frequency = 
-                                pdata->sr_sdata[i].sr_opp_data[j].frequency;  
-                        sr_info->sen[i].opp_data[j].opp_id = j;  	
+        		sr_info->sen[i].opp_data[j].err_maxlimit =
+                                pdata->sr_sdata[i].sr_opp_data[j].err_maxlimit;
+                        sr_info->sen[i].opp_data[j].margin =
+                                pdata->sr_sdata[i].sr_opp_data[j].margin;
+                        sr_info->sen[i].opp_data[j].nominal_volt =
+                                pdata->sr_sdata[i].sr_opp_data[j].nominal_volt;
+                        sr_info->sen[i].opp_data[j].frequency =
+                                pdata->sr_sdata[i].sr_opp_data[j].frequency;
+                        sr_info->sen[i].opp_data[j].opp_id = j;
                 }
 
                 if (i == SR_MPU) {
                         /* hardcoded CPU NR */
-                        curr_freq = cpufreq_get(0); 
-                                
+                        curr_freq = cpufreq_get(0);
+
                         /* update current OPP */
-                        sr_info->sen[i].curr_opp = get_current_opp(sr_info, i, 
+                        sr_info->sen[i].curr_opp = get_current_opp(sr_info, i,
                                         curr_freq*1000);
                         if (sr_info->sen[i].curr_opp == -EINVAL) {
-                                dev_err(&sr_info->pdev->dev, 
+                                dev_err(&sr_info->pdev->dev,
                                         "%s: cannot determine opp\n",__func__);
                                 ret = -EINVAL;
                                 goto err_free_sr_info;
                         }
                 } else {
-                        sr_info->sen[i].curr_opp = 
+                        sr_info->sen[i].curr_opp =
                                 pdata->sr_sdata[i].default_opp;
-                }   
+                }
 
-                dev_dbg(&pdev->dev, 
+                dev_dbg(&pdev->dev,
                         "%s: SR%d, curr_opp=%d, no_of_opps=%d, step_size=%d\n",
-                        __func__, i, sr_info->sen[i].curr_opp, 
-                        sr_info->sen[i].no_of_opps, 
+                        __func__, i, sr_info->sen[i].curr_opp,
+                        sr_info->sen[i].no_of_opps,
                         sr_info->uvoltage_step_size);
 
                 ret = sr_set_nvalues(sr_info, i);
@@ -850,7 +856,7 @@ static int __init am33xx_sr_probe(struct platform_device *pdev)
                         goto err_free_sr_info;
                 }
 
-                INIT_DELAYED_WORK(&sr_info->sen[i].work_reenable, 
+                INIT_DELAYED_WORK(&sr_info->sen[i].work_reenable,
                         irq_sr_reenable);
 
 		sr_info->res_name[i] = kzalloc(CLK_NAME_LEN + 1, GFP_KERNEL);
@@ -900,7 +906,7 @@ static int __init am33xx_sr_probe(struct platform_device *pdev)
 		}
 
 		ret = request_irq(sr_info->sen[i].irq, sr_class2_irq,
-			IRQF_DISABLED, sr_info->sen[i].name, 
+			IRQF_DISABLED, sr_info->sen[i].name,
                         (void *)&sr_info->sen[i]);
 		if (ret) {
 			dev_err(&pdev->dev, "%s: Could not install SR ISR\n",
@@ -911,7 +917,7 @@ static int __init am33xx_sr_probe(struct platform_device *pdev)
 		sr_info->sen[i].senn_en = pdata->sr_sdata[i].senn_mod;
 		sr_info->sen[i].senp_en = pdata->sr_sdata[i].senp_mod;
 
-                sr_info->sen[i].reg = 
+                sr_info->sen[i].reg =
                         regulator_get(NULL, sr_info->sen[i].reg_name);
                	if (IS_ERR(sr_info->sen[i].reg)) {
                         ret = -EINVAL;
@@ -919,10 +925,10 @@ static int __init am33xx_sr_probe(struct platform_device *pdev)
                 }
 
                	/* Read current regulator value and voltage */
-	        sr_info->sen[i].init_volt_mv = 
+	        sr_info->sen[i].init_volt_mv =
                         regulator_get_voltage(sr_info->sen[i].reg);
 
-                dev_dbg(&pdev->dev, "%s: regulator %d, init_volt = %d\n", 
+                dev_dbg(&pdev->dev, "%s: regulator %d, init_volt = %d\n",
                         __func__, i, sr_info->sen[i].init_volt_mv);
 	} /* for() */
 
@@ -977,7 +983,7 @@ err_free_mem:
         if (i != 0) {
                 goto err_reg_put;
         }
-        
+
 err_free_sr_info:
 	kfree(sr_info);
 	return ret;

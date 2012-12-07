@@ -245,7 +245,7 @@ int sr_register_class(struct omap_sr_class_data *class_data);
 #define R_MAXLIMIT                      (256)
 #define MAX_SENSORS                     2
 /* GG: eventually this should be determined at runtime */
-#define AM33XX_OPP_COUNT                4 
+#define AM33XX_OPP_COUNT                4
 
 /**
  * struct am33xx_sr_opp_data	- Smartreflex data per OPP
@@ -281,7 +281,7 @@ struct am33xx_sr_opp_data {
  * struct am33xx_sr_sdata	- Smartreflex sensors data
  * @sr_opp_data:	Pointer to data structure containing per OPP data
  *                      for this SR module.
- * @no_of_opps:         Number of OPP's supported for this sensor - 
+ * @no_of_opps:         Number of OPP's supported for this sensor -
  *                       determined dynamically when possible.
  * @default_opp:        Defines the opp to use on startup if OPP is fixed
  *                       or cannot be determined dynamically.

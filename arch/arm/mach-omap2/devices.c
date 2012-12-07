@@ -25,7 +25,7 @@
 #include <linux/can/platform/d_can.h>
 #include <linux/platform_data/uio_pruss.h>
 #include <linux/pwm/pwm.h>
-#include <linux/input/ti_tscadc.h>
+#include <linux/mfd/ti_tscadc.h>
 
 #include <mach/hardware.h>
 #include <mach/irqs.h>
@@ -194,22 +194,22 @@ int __init am33xx_register_lcdc(struct da8xx_lcdc_platform_data *pdata)
 	return 0;
 }
 
-int __init am33xx_register_tsc(struct tsc_data *pdata)
+int __init am33xx_register_mfd_tscadc(struct mfd_tscadc_board *pdata)
 {
 	int id = -1;
 	struct platform_device *pdev;
 	struct omap_hwmod *oh;
 	char *oh_name = "adc_tsc";
-	char *dev_name = "tsc";
+	char *dev_name = "ti_tscadc";
 
 	oh = omap_hwmod_lookup(oh_name);
 	if (!oh) {
-		pr_err("Could not look up TSC%d hwmod\n", id);
+		pr_err("Could not look up TSCADC%d hwmod\n", id);
 		return -ENODEV;
 	}
 
 	pdev = omap_device_build(dev_name, id, oh, pdata,
-			sizeof(struct tsc_data), NULL, 0, 0);
+			sizeof(struct mfd_tscadc_board), NULL, 0, 0);
 
 	WARN(IS_ERR(pdev), "Can't build omap_device for %s:%s.\n",
 			dev_name, oh->name);
@@ -726,72 +726,18 @@ static void omap_init_sham(void)
 }
 
 #elif defined(CONFIG_CRYPTO_DEV_OMAP4_SHAM) || defined(CONFIG_CRYPTO_DEV_OMAP4_SHAM_MODULE)
-
-static struct resource omap4_sham_resources[] = {
-	{
-		.start	= AM33XX_SHA1MD5_P_BASE,
-		.end	= AM33XX_SHA1MD5_P_BASE + 0x120,
-		.flags	= IORESOURCE_MEM,
-	},
-	{
-		.start	= AM33XX_IRQ_SHAEIP57t0_P,
-		.flags	= IORESOURCE_IRQ,
-	},
-	{
-		.start	= AM33XX_DMA_SHAEIP57T0_DIN,
-		.flags	= IORESOURCE_DMA,
-	}
-};
-
-static int omap4_sham_resources_sz = ARRAY_SIZE(omap4_sham_resources);
-
-
-static struct platform_device sham_device = {
-	.name		= "omap4-sham",
-	.id		= -1,
-};
-
-#if 0
-static void omap_init_sham(void)
+static void __init omap_init_sham(void)
 {
-	sham_device.resource = omap4_sham_resources;
-	sham_device.num_resources = omap4_sham_resources_sz;
-
-	platform_device_register(&sham_device);
-}
-#endif
-
-int __init omap_init_sham(void)
-{
-	int id = -1;
-	struct platform_device *pdev;
 	struct omap_hwmod *oh;
-	char *oh_name = "sha0";
-	char *name = "omap4-sham";
+	struct platform_device *pdev;
 
-	oh = omap_hwmod_lookup(oh_name);
-	if (!oh) {
-		pr_err("Could not look up %s\n", oh_name);
-		return -ENODEV;
-	}
+	oh = omap_hwmod_lookup("sha0");
+	if (!oh)
+		return;
 
-	pdev = omap_device_build(name, id, oh, NULL, 0, NULL, 0, 0);
-	//pdev.resource = omap4_sham_resources;
-	//pdev.num_resources = omap4_sham_resources_sz;
-
-	if (IS_ERR(pdev)) {
-		WARN(1, "Can't build omap_device for %s:%s.\n",
-						name, oh->name);
-		return PTR_ERR(pdev);
-	}
-
-	return 0;
+	pdev = omap_device_build("omap4-sham", -1, oh, NULL, 0, NULL, 0, 0);
+	WARN(IS_ERR(pdev), "Can't build omap_device for omap-sham\n");
 }
-
-
-
-
-
 #else
 static inline void omap_init_sham(void) { }
 #endif
@@ -863,71 +809,37 @@ static void omap_init_aes(void)
 }
 
 #elif defined(CONFIG_CRYPTO_DEV_OMAP4_AES) || defined(CONFIG_CRYPTO_DEV_OMAP4_AES_MODULE)
-
-static struct resource omap4_aes_resources[] = {
-	{
-		.start	= AM33XX_AES0_P_BASE,
-		.end	= AM33XX_AES0_P_BASE + 0x4C,
-		.flags	= IORESOURCE_MEM,
-	},
-	{
-		.start	= AM33XX_DMA_AESEIP36T0_DOUT,
-		.flags	= IORESOURCE_DMA,
-	},
-	{
-		.start	= AM33XX_DMA_AESEIP36T0_DIN,
-		.flags	= IORESOURCE_DMA,
-	}
-};
-static int omap4_aes_resources_sz = ARRAY_SIZE(omap4_aes_resources);
-
-static struct platform_device aes_device = {
-	.name		= "omap4-aes",
-	.id		= -1,
-};
-
-#if 0
-static void omap_init_aes(void)
+static void __init omap_init_aes(void)
 {
-	aes_device.resource = omap4_aes_resources;
-	aes_device.num_resources = omap4_aes_resources_sz;
-	platform_device_register(&aes_device);
-}
-#endif
-
-int __init omap_init_aes(void)
-{
-	int id = -1;
-	struct platform_device *pdev;
 	struct omap_hwmod *oh;
-	char *oh_name = "aes0";
-	char *name = "omap4-aes";
+	struct platform_device *pdev;
 
-	oh = omap_hwmod_lookup(oh_name);
-	if (!oh) {
-		pr_err("Could not look up %s\n", oh_name);
-		return -ENODEV;
-	}
+	oh = omap_hwmod_lookup("aes0");
+	if (!oh)
+		return;
 
-	pdev = omap_device_build(name, id, oh, NULL, 0, NULL, 0, 0);
-	//pdev.resource = omap4_sham_resources;
-	//pdev.num_resources = omap4_sham_resources_sz;
-
-	if (IS_ERR(pdev)) {
-		WARN(1, "Can't build omap_device for %s:%s.\n",
-						name, oh->name);
-		return PTR_ERR(pdev);
-	}
-
-	return 0;
+	pdev = omap_device_build("omap4-aes", -1, oh, NULL, 0, NULL, 0, 0);
+	WARN(IS_ERR(pdev), "Can't build omap_device for omap-aes\n");
 }
-
-
-
-
-
 #else
 static inline void omap_init_aes(void) { }
+#endif
+
+#if IS_ENABLED(CONFIG_HW_RANDOM_OMAP4)
+static void __init omap_init_rng(void)
+{
+	struct omap_hwmod *oh;
+	struct platform_device *pdev;
+
+	oh = omap_hwmod_lookup("rng");
+	if (!oh)
+		return;
+
+	pdev = omap_device_build("omap4_rng", -1, oh, NULL, 0, NULL, 0, 0);
+	WARN(IS_ERR(pdev), "Can't build omap_device for omap-rng\n");
+}
+#else
+static inline void omap_init_rng(void) {}
 #endif
 
 /*-------------------------------------------------------------------------*/
@@ -1159,14 +1071,14 @@ int map_xbar_event_to_channel(unsigned int event, unsigned int *channel,
 		/* confirm the range */
 		if (*channel < EDMA_MAX_DMACH)
 			clear_bit(*channel, edma_cc[ctrl]->edma_unused);
-		mask = (*channel)%4;
 		offset = (*channel)/4;
 		offset *= 4;
-		offset += mask;
 		val = (unsigned int)__raw_readl(AM33XX_CTRL_REGADDR(
 					AM33XX_SCM_BASE_EDMA + offset));
-		val = val & (~(0xFF));
-		val = val | (xbar_event_mapping[xbar_evt_no].xbar_event_no);
+		mask = *channel & 0x3;
+		mask <<= 3;
+		val &= ~(0xFF << mask);
+		val |= xbar_event_mapping[xbar_evt_no].xbar_event_no << mask;
 		__raw_writel(val,
 			AM33XX_CTRL_REGADDR(AM33XX_SCM_BASE_EDMA + offset));
 		return 0;
@@ -1315,7 +1227,7 @@ static struct platform_device am335x_sgx = {
 
 /* smartreflex platform data */
 
-/* The values below are based upon silicon characterization data.  
+/* The values below are based upon silicon characterization data.
  * Each OPP and sensor combination potentially has different values.
  * The values of ERR2VOLT_GAIN and ERR_MIN_LIMIT also change based on
  * the PMIC step size.  Values have been given to cover the AM335 EVM
@@ -1468,7 +1380,7 @@ static struct am33xx_sr_sdata sr_sensor_data[] = {
        },
        {
                .sr_opp_data    = sr1_opp_data,
-                /* the opp data below should be determined 
+                /* the opp data below should be determined
                    dynamically during SR probe */
                 .no_of_opps     = 0x4,
                 .default_opp    = 0x3,
@@ -1529,10 +1441,10 @@ static struct platform_device am33xx_sr_device = {
 
 void __init am33xx_sr_init(void)
 {
-        /* For beaglebone, update voltage step size and related parameters 
-           appropriately.  All other AM33XX platforms are good with the 
+        /* For beaglebone, update voltage step size and related parameters
+           appropriately.  All other AM33XX platforms are good with the
            structure defaults as initialized above. */
-        if ((am33xx_evmid == BEAGLE_BONE_OLD) || 
+        if ((am33xx_evmid == BEAGLE_BONE_OLD) ||
                         (am33xx_evmid == BEAGLE_BONE_A3)) {
                 printk(KERN_ERR "address of pdata = %08x\n", (u32)&am33xx_sr_pdata);
                 am33xx_sr_pdata.vstep_size_uv = 25000;
@@ -1580,6 +1492,7 @@ static int __init omap2_init_devices(void)
 	omap_init_sti();
 	omap_init_sham();
 	omap_init_aes();
+	omap_init_rng();
 	omap_init_vout();
 	am33xx_register_edma();
 	am33xx_init_pcm();
@@ -1600,13 +1513,13 @@ arch_initcall(omap2_init_devices);
 /* TODO : Verify the offsets */
 static struct cpsw_slave_data am33xx_cpsw_slaves[] = {
 	{
-		.slave_reg_ofs  = 0x208,
+		.slave_reg_ofs  = 0x200,
 		.sliver_reg_ofs = 0xd80,
 		.phy_id		= "0:00",
 		.dual_emac_reserved_vlan = CPSW_PORT_VLAN_SLAVE_0,
 	},
 	{
-		.slave_reg_ofs  = 0x308,
+		.slave_reg_ofs  = 0x300,
 		.sliver_reg_ofs = 0xdc0,
 		.phy_id		= "0:01",
 		.dual_emac_reserved_vlan = CPSW_PORT_VLAN_SLAVE_1,
@@ -1623,6 +1536,9 @@ static struct cpsw_platform_data am33xx_cpsw_pdata = {
 	.ale_entries		= 1024,
 	.host_port_reg_ofs      = 0x108,
 	.hw_stats_reg_ofs       = 0x900,
+	.cpts_reg_ofs		= 0xc00,
+	.cpts_clock_mult	= 0x80000000,
+	.cpts_clock_shift	= 29,
 	.bd_ram_ofs		= 0x2000,
 	.bd_ram_size		= SZ_8K,
 	.rx_descs               = 64,
