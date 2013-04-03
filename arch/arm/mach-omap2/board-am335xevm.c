@@ -37,6 +37,7 @@
 #include <linux/mfd/tps65217.h>
 #include <linux/pwm_backlight.h>
 #include <linux/input/ti_tsc.h>
+#include <linux/platform_data/ti_adc.h>
 #include <linux/mfd/ti_tscadc.h>
 #include <linux/reboot.h>
 #include <linux/pwm/pwm.h>
@@ -55,6 +56,7 @@
 #include <asm/hardware/asp.h>
 
 #include <plat/omap_device.h>
+#include <plat/omap-pm.h>
 #include <plat/irqs.h>
 #include <plat/board.h>
 #include <plat/common.h>
@@ -155,8 +157,13 @@ static struct tsc_data am335x_touchscreen_data  = {
 	.steps_to_configure = 5,
 };
 
+static struct adc_data am335x_adc_data = {
+	.adc_channels = 4,
+};
+
 static struct mfd_tscadc_board tscadc = {
 	.tsc_init = &am335x_touchscreen_data,
+	.adc_init = &am335x_adc_data,
 };
 
 static u8 am335x_iis_serializer_direction1[] = {
@@ -175,8 +182,10 @@ static struct snd_platform_data am335x_evm_snd_data1 = {
 	.serial_dir	= am335x_iis_serializer_direction1,
 	.asp_chan_q	= EVENTQ_2,
 	.version	= MCASP_VERSION_3,
-	.txnumevt	= 1,
-	.rxnumevt	= 1,
+	.txnumevt	= 32,
+	.rxnumevt	= 32,
+	.get_context_loss_count	=
+			omap_pm_get_dev_context_loss_count,
 };
 
 static u8 am335x_evm_sk_iis_serializer_direction1[] = {
@@ -195,7 +204,9 @@ static struct snd_platform_data am335x_evm_sk_snd_data1 = {
 	.serial_dir	= am335x_evm_sk_iis_serializer_direction1,
 	.asp_chan_q	= EVENTQ_2,
 	.version	= MCASP_VERSION_3,
-	.txnumevt	= 1,
+	.txnumevt	= 32,
+	.get_context_loss_count	=
+			omap_pm_get_dev_context_loss_count,
 };
 
 static struct omap2_hsmmc_info am335x_mmc[] __initdata = {
@@ -1058,6 +1069,8 @@ static void lcdc_init(int evm_id, int profile)
 		pr_err("LCDC not supported on this evm (%d)\n",evm_id);
 		return;
 	}
+
+	lcdc_pdata->get_context_loss_count = omap_pm_get_dev_context_loss_count;
 
 	if (am33xx_register_lcdc(lcdc_pdata))
 		pr_info("Failed to register LCDC device\n");
