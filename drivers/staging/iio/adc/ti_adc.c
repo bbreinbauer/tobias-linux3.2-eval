@@ -22,7 +22,6 @@
 #include <linux/platform_device.h>
 #include <linux/io.h>
 #include <linux/sched.h>
-#include <linux/delay.h>
 
 #include "../iio.h"
 #include "../sysfs.h"
@@ -110,30 +109,22 @@ static ssize_t tiadc_set_mode(struct device *dev,
 {
 	struct iio_dev *indio_dev = dev_get_drvdata(dev);
 	struct adc_device *adc_dev = iio_priv(indio_dev);
-	int i, channels = 0, steps;
-	unsigned int stepconfig, config;
-
-	steps = (TOTAL_STEPS - adc_dev->channels) + 1;
-	channels = TOTAL_CHANNELS - adc_dev->channels;
+	unsigned int config;
 
 	config = adc_readl(adc_dev, TSCADC_REG_CTRL);
 	config &= ~(TSCADC_CNTRLREG_TSCSSENB);
 	adc_writel(adc_dev, TSCADC_REG_CTRL, config);
 
-	stepconfig = adc_readl(adc_dev, TSCADC_REG_STEPCONFIG(steps));
-
-	for (i = steps; i <= TOTAL_STEPS; i++) {
-		if (!strncmp(buf, "oneshot", 7)) {
-			stepconfig &= ~(TSCADC_STEPCONFIG_MODE_SWCNT);
-			adc_writel(adc_dev, TSCADC_REG_STEPCONFIG(i),
-						stepconfig);
-			adc_dev->is_continuous_mode = false;
-		} else if (!strncmp(buf, "continuous", 10)) {
-			adc_writel(adc_dev, TSCADC_REG_STEPCONFIG(i),
-				stepconfig | TSCADC_STEPCONFIG_MODE_SWCNT);
-			adc_dev->is_continuous_mode = true;
-		}
+	if (!strncmp(buf, "oneshot", 7))
+		adc_dev->is_continuous_mode = false;
+	else if (!strncmp(buf, "continuous", 10))
+		adc_dev->is_continuous_mode = true;
+	else {
+		dev_err(dev, "Operational mode unknown\n");
+		return -EINVAL;
 	}
+
+	adc_step_config(adc_dev, adc_dev->is_continuous_mode);
 
 	config = adc_readl(adc_dev, TSCADC_REG_CTRL);
 	adc_writel(adc_dev, TSCADC_REG_CTRL,
@@ -160,7 +151,20 @@ static irqreturn_t tiadc_irq(int irq, void *private)
 	unsigned int status, config;
 
 	status = adc_readl(adc_dev, TSCADC_REG_IRQSTATUS);
-	if (status & TSCADC_IRQENB_FIFO1THRES) {
+	if (status & TSCADC_IRQENB_FIFO1OVRRUN) {
+		config = adc_readl(adc_dev, TSCADC_REG_CTRL);
+		config &= ~(TSCADC_CNTRLREG_TSCSSENB);
+		adc_writel(adc_dev, TSCADC_REG_CTRL, config);
+
+		adc_writel(adc_dev, TSCADC_REG_IRQSTATUS,
+				TSCADC_IRQENB_FIFO1OVRRUN |
+				TSCADC_IRQENB_FIFO1UNDRFLW |
+				TSCADC_IRQENB_FIFO1THRES);
+
+		adc_writel(adc_dev, TSCADC_REG_CTRL,
+			(config | TSCADC_CNTRLREG_TSCSSENB));
+		return IRQ_HANDLED;
+	} else if (status & TSCADC_IRQENB_FIFO1THRES) {
 		adc_writel(adc_dev, TSCADC_REG_IRQCLR,
 				TSCADC_IRQENB_FIFO1THRES);
 
@@ -170,24 +174,6 @@ static irqreturn_t tiadc_irq(int irq, void *private)
 		} else {
 			wake_up_interruptible(&adc_dev->wq_data_avail);
 		}
-		adc_writel(adc_dev, TSCADC_REG_IRQSTATUS,
-				(status | TSCADC_IRQENB_FIFO1THRES));
-		return IRQ_HANDLED;
-	} else if ((status & TSCADC_IRQENB_FIFO1OVRRUN) ||
-			(status & TSCADC_IRQENB_FIFO1UNDRFLW)) {
-		config = adc_readl(adc_dev, TSCADC_REG_CTRL);
-		config &= ~(TSCADC_CNTRLREG_TSCSSENB);
-		adc_writel(adc_dev, TSCADC_REG_CTRL, config);
-
-		if (status & TSCADC_IRQENB_FIFO1UNDRFLW)
-			adc_writel(adc_dev, TSCADC_REG_IRQSTATUS,
-			(status | TSCADC_IRQENB_FIFO1UNDRFLW));
-		else
-			adc_writel(adc_dev, TSCADC_REG_IRQSTATUS,
-				(status | TSCADC_IRQENB_FIFO1OVRRUN));
-
-		adc_writel(adc_dev, TSCADC_REG_CTRL,
-			(config | TSCADC_CNTRLREG_TSCSSENB));
 		return IRQ_HANDLED;
 	} else {
 		return IRQ_NONE;
@@ -200,22 +186,21 @@ static void tiadc_poll_handler(struct work_struct *work_s)
 		container_of(work_s, struct adc_device, poll_work);
 	struct iio_dev *idev = iio_priv_to_dev(adc_dev);
 	struct iio_buffer *buffer = idev->buffer;
-	unsigned int fifo1count, readx1, status;
+	unsigned int fifo1count, readx1;
 	int i;
 	u32 *iBuf;
 
 	fifo1count = adc_readl(adc_dev, TSCADC_REG_FIFO1CNT);
-	iBuf = kmalloc((fifo1count + 1) * sizeof(u32), GFP_KERNEL);
-	if (iBuf == NULL)
-		return;
+	if (fifo1count * sizeof(u32) <
+				buffer->access->get_bytes_per_datum(buffer)) {
+		dev_err(adc_dev->mfd_tscadc->dev, "%s: Short FIFO event\n",
+								__func__);
+		goto out;
+	}
 
-	/*
-	 * Wait for ADC sequencer to settle down.
-	 * There could be a scenario where in we
-	 * try to read data from ADC before
-	 * it is available.
-	 */
-	udelay(500);
+	iBuf = kmalloc(fifo1count * sizeof(u32), GFP_KERNEL);
+	if (iBuf == NULL)
+		goto out;
 
 	for (i = 0; i < fifo1count; i++) {
 		readx1 = adc_readl(adc_dev, TSCADC_REG_FIFO1);
@@ -224,11 +209,13 @@ static void tiadc_poll_handler(struct work_struct *work_s)
 	}
 
 	buffer->access->store_to(buffer, (u8 *) iBuf, iio_get_time_ns());
-	status = adc_readl(adc_dev, TSCADC_REG_IRQENABLE);
-	adc_writel(adc_dev, TSCADC_REG_IRQENABLE,
-			(status | TSCADC_IRQENB_FIFO1THRES));
-
 	kfree(iBuf);
+
+out:
+	adc_writel(adc_dev, TSCADC_REG_IRQSTATUS,
+				TSCADC_IRQENB_FIFO1THRES);
+	adc_writel(adc_dev, TSCADC_REG_IRQENABLE,
+				TSCADC_IRQENB_FIFO1THRES);
 }
 
 static int tiadc_buffer_preenable(struct iio_dev *idev)
@@ -243,23 +230,29 @@ static int tiadc_buffer_postenable(struct iio_dev *idev)
 {
 	struct adc_device *adc_dev = iio_priv(idev);
 	struct iio_buffer *buffer = idev->buffer;
-	unsigned int enb, status, fifo1count;
-	int stepnum, i;
+	unsigned int enb, config;
+	int stepnum;
 	u8 bit;
 
 	if (!adc_dev->is_continuous_mode) {
 		pr_info("Data cannot be read continuously in one shot mode\n");
 		return -EINVAL;
 	} else {
-		status = adc_readl(adc_dev, TSCADC_REG_IRQENABLE);
-		adc_writel(adc_dev, TSCADC_REG_IRQENABLE,
-				(status | TSCADC_IRQENB_FIFO1THRES |
-				 TSCADC_IRQENB_FIFO1OVRRUN |
-				 TSCADC_IRQENB_FIFO1UNDRFLW));
 
-		fifo1count = adc_readl(adc_dev, TSCADC_REG_FIFO1CNT);
-		for (i = 0; i < fifo1count; i++)
-			adc_readl(adc_dev, TSCADC_REG_FIFO1);
+		config = adc_readl(adc_dev, TSCADC_REG_CTRL);
+		adc_writel(adc_dev, TSCADC_REG_CTRL,
+					config & ~TSCADC_CNTRLREG_TSCSSENB);
+		adc_writel(adc_dev, TSCADC_REG_CTRL,
+					config | TSCADC_CNTRLREG_TSCSSENB);
+
+
+		adc_writel(adc_dev, TSCADC_REG_IRQSTATUS,
+				TSCADC_IRQENB_FIFO1THRES |
+				TSCADC_IRQENB_FIFO1OVRRUN |
+				TSCADC_IRQENB_FIFO1UNDRFLW);
+		adc_writel(adc_dev, TSCADC_REG_IRQENABLE,
+				TSCADC_IRQENB_FIFO1THRES |
+				TSCADC_IRQENB_FIFO1OVRRUN);
 
 		adc_writel(adc_dev, TSCADC_REG_SE, 0x00);
 		for_each_set_bit(bit, buffer->scan_mask,
@@ -274,8 +267,8 @@ static int tiadc_buffer_postenable(struct iio_dev *idev)
 			 */
 			stepnum = chan->channel + 9;
 			enb = adc_readl(adc_dev, TSCADC_REG_SE);
-			enb |= stepnum;
-			adc_writel(adc_dev, TSCADC_REG_SE, TSCADC_ENB(enb));
+			enb |= (1 << stepnum);
+			adc_writel(adc_dev, TSCADC_REG_SE, enb);
 		}
 		return 0;
 	}
@@ -517,12 +510,16 @@ static int adc_resume(struct platform_device *pdev)
 	struct adc_device	*adc_dev = tscadc_dev->adc;
 	unsigned int restore;
 
+	restore = adc_readl(adc_dev, TSCADC_REG_CTRL);
+	restore &= ~(TSCADC_CNTRLREG_TSCSSENB);
+	adc_writel(adc_dev, TSCADC_REG_CTRL, restore);
+
 	adc_writel(adc_dev, TSCADC_REG_FIFO1THR, FIFO1_THRESHOLD);
 	adc_step_config(adc_dev, adc_dev->is_continuous_mode);
 
 	/* Make sure ADC is powered up */
-	restore = adc_readl(adc_dev, TSCADC_REG_CTRL);
 	restore &= ~(TSCADC_CNTRLREG_POWERDOWN);
+	restore |= TSCADC_CNTRLREG_TSCSSENB;
 	adc_writel(adc_dev, TSCADC_REG_CTRL, restore);
 	return 0;
 }

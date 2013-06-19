@@ -1654,6 +1654,21 @@ static void mmc1_wl12xx_init(int evm_id, int profile)
 	am335x_mmc[1].ocr_mask = MMC_VDD_32_33 | MMC_VDD_33_34; /* 3V3 */
 }
 
+static void mmc1_emmc_init(int evm_id, int profile)
+{
+	setup_pin_mux(mmc1_common_pin_mux);
+	setup_pin_mux(mmc1_dat4_7_pin_mux);
+
+	am335x_mmc[1].mmc = 2;
+	am335x_mmc[1].caps = MMC_CAP_8_BIT_DATA;
+	am335x_mmc[1].gpio_cd = -EINVAL;
+	am335x_mmc[1].gpio_wp = -EINVAL;
+	am335x_mmc[1].ocr_mask = MMC_VDD_32_33 | MMC_VDD_33_34; /* 3V3 */
+
+	/* mmc will be initialized when mmc0_init is called */
+	return;
+}
+
 static void mmc2_wl12xx_init(int evm_id, int profile)
 {
 	setup_pin_mux(mmc2_wl12xx_pin_mux);
@@ -2054,7 +2069,7 @@ static void am335x_rtc_init(int evm_id, int profile)
 	clk_disable(clk);
 	clk_put(clk);
 
-	if (omap_rev() == AM335X_REV_ES2_0)
+	if (omap_rev() >= AM335X_REV_ES2_0)
 		am335x_rtc_info.wakeup_capable = 1;
 
 	oh = omap_hwmod_lookup("rtc");
@@ -2090,6 +2105,12 @@ static void clkout2_enable(int evm_id, int profile)
 	setup_pin_mux(clkout2_pin_mux);
 }
 
+static void sgx_init(int evm_id, int profile)
+{
+	if (omap3_has_sgx()) {
+		am33xx_gpu_init();
+	}
+}
 /* General Purpose EVM */
 static struct evm_dev_cfg gen_purp_evm_dev_cfg[] = {
 	{am335x_rtc_init, DEV_ON_BASEBOARD, PROFILE_ALL},
@@ -2124,6 +2145,7 @@ static struct evm_dev_cfg gen_purp_evm_dev_cfg[] = {
 	{volume_keys_init,  DEV_ON_DGHTR_BRD, PROFILE_0},
 	{uart2_init,	DEV_ON_DGHTR_BRD, PROFILE_3},
 	{haptics_init,	DEV_ON_DGHTR_BRD, (PROFILE_4)},
+	{sgx_init,	DEV_ON_BASEBOARD, PROFILE_ALL},
 	{NULL, 0, 0},
 };
 
@@ -2152,6 +2174,7 @@ static struct evm_dev_cfg beaglebone_old_dev_cfg[] = {
 	{usb1_init,	DEV_ON_BASEBOARD, PROFILE_NONE},
 	{mmc0_init,	DEV_ON_BASEBOARD, PROFILE_NONE},
 	{i2c2_init,	DEV_ON_BASEBOARD, PROFILE_NONE},
+	{sgx_init,	DEV_ON_BASEBOARD, PROFILE_NONE},
 	{NULL, 0, 0},
 };
 
@@ -2165,6 +2188,22 @@ static struct evm_dev_cfg beaglebone_dev_cfg[] = {
 	{usb1_init,	DEV_ON_BASEBOARD, PROFILE_NONE},
 	{mmc0_init,	DEV_ON_BASEBOARD, PROFILE_NONE},
 	{i2c2_init,	DEV_ON_BASEBOARD, PROFILE_NONE},
+	{sgx_init,	DEV_ON_BASEBOARD, PROFILE_NONE},
+	{NULL, 0, 0},
+};
+
+/* Beaglebone Black */
+static struct evm_dev_cfg beagleboneblack_dev_cfg[] = {
+	{am335x_rtc_init, DEV_ON_BASEBOARD, PROFILE_NONE},
+	{clkout2_enable, DEV_ON_BASEBOARD, PROFILE_NONE},
+	{tps65217_init,	DEV_ON_BASEBOARD, PROFILE_NONE},
+	{mii1_init,	DEV_ON_BASEBOARD, PROFILE_NONE},
+	{usb0_init,	DEV_ON_BASEBOARD, PROFILE_NONE},
+	{usb1_init,	DEV_ON_BASEBOARD, PROFILE_NONE},
+	{mmc1_emmc_init,	DEV_ON_BASEBOARD, PROFILE_NONE},
+	{mmc0_init,	DEV_ON_BASEBOARD, PROFILE_NONE},
+	{i2c2_init,	DEV_ON_BASEBOARD, PROFILE_NONE},
+	{sgx_init,	DEV_ON_BASEBOARD, PROFILE_NONE},
 	{NULL, 0, 0},
 };
 
@@ -2185,6 +2224,7 @@ static struct evm_dev_cfg evm_sk_dev_cfg[] = {
 	{uart1_wl12xx_init, DEV_ON_BASEBOARD, PROFILE_ALL},
 	{wl12xx_init,       DEV_ON_BASEBOARD, PROFILE_ALL},
 	{gpio_ddr_vtt_enb_init,	DEV_ON_BASEBOARD, PROFILE_ALL},
+	{sgx_init,       DEV_ON_BASEBOARD, PROFILE_ALL},
 	{NULL, 0, 0},
 };
 
@@ -2195,6 +2235,102 @@ static int am33xx_evm_tx_clk_dly_phy_fixup(struct phy_device *phydev)
 	phy_write(phydev, AR8051_PHY_DEBUG_DATA_REG, AR8051_RGMII_TX_CLK_DLY);
 
 	return 0;
+}
+
+#define AM33XX_VDD_CORE_OPP50_UV		1100000
+#define AM33XX_OPP120_FREQ		600000000
+#define AM33XX_OPPTURBO_FREQ		720000000
+
+#define AM33XX_ES2_0_VDD_CORE_OPP50_UV	950000
+#define AM33XX_ES2_0_OPP120_FREQ	720000000
+#define AM33XX_ES2_0_OPPTURBO_FREQ	800000000
+#define AM33XX_ES2_0_OPPNITRO_FREQ	1000000000
+
+#define AM33XX_ES2_1_VDD_CORE_OPP50_UV	950000
+#define AM33XX_ES2_1_OPP120_FREQ	720000000
+#define AM33XX_ES2_1_OPPTURBO_FREQ	800000000
+#define AM33XX_ES2_1_OPPNITRO_FREQ	1000000000
+
+static void am335x_opp_update(void)
+{
+	u32 rev;
+	int voltage_uv = 0;
+	struct device *core_dev, *mpu_dev;
+	struct regulator *core_reg;
+
+	core_dev = omap_device_get_by_hwmod_name("l3_main");
+	mpu_dev = omap_device_get_by_hwmod_name("mpu");
+
+	if (!mpu_dev || !core_dev) {
+		pr_err("%s: Aiee.. no mpu/core devices? %p %p\n", __func__,
+		       mpu_dev, core_dev);
+		return;
+	}
+
+	core_reg = regulator_get(core_dev, "vdd_core");
+	if (IS_ERR(core_reg)) {
+		pr_err("%s: unable to get core regulator\n", __func__);
+		return;
+	}
+
+	/*
+	 * Ensure physical regulator is present.
+	 * (e.g. could be dummy regulator.)
+	 */
+	voltage_uv = regulator_get_voltage(core_reg);
+	if (voltage_uv < 0) {
+		pr_err("%s: physical regulator not present for core" \
+		       "(%d)\n", __func__, voltage_uv);
+		regulator_put(core_reg);
+		return;
+	}
+
+	pr_debug("%s: core regulator value %d\n", __func__, voltage_uv);
+	if (voltage_uv > 0) {
+		rev = omap_rev();
+		switch (rev) {
+		case AM335X_REV_ES1_0:
+			if (voltage_uv <= AM33XX_VDD_CORE_OPP50_UV) {
+				/*
+				 * disable the higher freqs - we dont care about
+				 * the results
+				 */
+				opp_disable(mpu_dev, AM33XX_OPP120_FREQ);
+				opp_disable(mpu_dev, AM33XX_OPPTURBO_FREQ);
+			}
+			break;
+		case AM335X_REV_ES2_0:
+			if (voltage_uv <= AM33XX_ES2_0_VDD_CORE_OPP50_UV) {
+				/*
+				 * disable the higher freqs - we dont care about
+				 * the results
+				 */
+				opp_disable(mpu_dev,
+					    AM33XX_ES2_0_OPP120_FREQ);
+				opp_disable(mpu_dev,
+					    AM33XX_ES2_0_OPPTURBO_FREQ);
+				opp_disable(mpu_dev,
+					    AM33XX_ES2_0_OPPNITRO_FREQ);
+			}
+			break;
+		case AM335X_REV_ES2_1:
+		/* FALLTHROUGH */
+		default:
+			if (voltage_uv <= AM33XX_ES2_1_VDD_CORE_OPP50_UV) {
+				/*
+				 * disable the higher freqs - we dont care about
+				 * the results
+				 */
+				opp_disable(mpu_dev,
+					    AM33XX_ES2_1_OPP120_FREQ);
+				opp_disable(mpu_dev,
+					    AM33XX_ES2_1_OPPTURBO_FREQ);
+				opp_disable(mpu_dev,
+					    AM33XX_ES2_1_OPPNITRO_FREQ);
+			}
+			break;
+		}
+	}
 }
 
 static void setup_general_purpose_evm(void)
@@ -2263,6 +2399,23 @@ static void setup_beaglebone(void)
 	am335x_mmc[0].gpio_wp = -EINVAL;
 
 	_configure_device(BEAGLE_BONE_A3, beaglebone_dev_cfg, PROFILE_NONE);
+
+	/* TPS65217 regulator has full constraints */
+	regulator_has_full_constraints();
+
+	am33xx_cpsw_init(AM33XX_CPSW_MODE_MII, NULL, NULL);
+}
+
+/* BeagleBone Black */
+static void setup_beagleboneblack(void)
+{
+	pr_info("The board is a AM335x Beaglebone Black.\n");
+
+	/* Beagle Bone has Micro-SD slot which doesn't have Write Protect pin */
+	am335x_mmc[0].gpio_wp = -EINVAL;
+
+	_configure_device(BEAGLE_BONE_BLACK, beagleboneblack_dev_cfg,
+				PROFILE_NONE);
 
 	/* TPS65217 regulator has full constraints */
 	regulator_has_full_constraints();
@@ -2362,6 +2515,8 @@ static void am335x_evm_setup(struct memory_accessor *mem_acc, void *context)
 			setup_beaglebone_old();
 		else
 			setup_beaglebone();
+	} else if (!strncmp("A335BNLT", config.name, 8)) {
+		setup_beagleboneblack();
 	} else if (!strncmp("A335X_SK", config.name, 8)) {
 		daughter_brd_detected = false;
 		setup_starterkit();
@@ -2376,6 +2531,22 @@ static void am335x_evm_setup(struct memory_accessor *mem_acc, void *context)
 			setup_ind_auto_motor_ctrl_evm();
 		else
 			goto out;
+	}
+
+	am335x_opp_update();
+
+	/*
+	 * For now, Beaglebone Black uses PG 2.0 that are speed binned and operate
+	 * up to 1GHz. So re-enable Turbo and Nitro modes,
+	 */
+	if (!strncmp("A335BNLT", config.name, 8)) {
+		struct device *mpu_dev;
+
+		mpu_dev = omap_device_get_by_hwmod_name("mpu");
+		opp_enable(mpu_dev,
+			    AM33XX_ES2_0_OPPTURBO_FREQ);
+		opp_enable(mpu_dev,
+			    AM33XX_ES2_0_OPPNITRO_FREQ);
 	}
 
 	/* SmartReflex also requires board information. */
