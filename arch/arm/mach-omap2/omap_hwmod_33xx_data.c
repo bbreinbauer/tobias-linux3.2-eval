@@ -79,7 +79,6 @@ static struct omap_hwmod am33xx_spi1_hwmod;
 static struct omap_hwmod am33xx_elm_hwmod;
 static struct omap_hwmod am33xx_adc_tsc_hwmod;
 static struct omap_hwmod am33xx_aes0_hwmod;
-static struct omap_hwmod am33xx_rtc_hwmod;
 static struct omap_hwmod am33xx_sha0_hwmod;
 static struct omap_hwmod am33xx_mcasp0_hwmod;
 static struct omap_hwmod am33xx_mcasp1_hwmod;
@@ -2141,65 +2140,6 @@ static struct omap_hwmod am33xx_ocpwp_hwmod = {
 	},
 };
 
-static struct omap_hwmod_class_sysconfig am33xx_rtc_sysc = {
-	.rev_offs	= 0x74,
-	.sysc_offs	= 0x78,
-	.sysc_flags	= SYSC_HAS_SIDLEMODE,
-	.idlemodes	= (SIDLE_FORCE | SIDLE_NO | SIDLE_SMART |
-			SIDLE_SMART_WKUP),
-	.sysc_fields	= &omap_hwmod_sysc_type3,
-};
-
-/* rtc */
-static struct omap_hwmod_class am33xx_rtc_hwmod_class = {
-	.name		= "rtc",
-	.sysc		= &am33xx_rtc_sysc,
-};
-
-static struct omap_hwmod_irq_info am33xx_rtc_irqs[] = {
-	{ .irq = 75 },
-	{ .irq = 76 },
-	{ .irq = -1 }
-};
-
-static struct omap_hwmod_addr_space am33xx_rtc_addrs[] = {
-	{
-		.pa_start	= 0x44E3E000,
-		.pa_end		= 0x44E3E000 + SZ_4K - 1,
-		.flags		= ADDR_TYPE_RT
-	},
-	{ }
-};
-
-static struct omap_hwmod_ocp_if am33xx_l4_wkup_rtc = {
-	.master		= &am33xx_l4wkup_hwmod,
-	.slave		= &am33xx_rtc_hwmod,
-	.clk		= "rtc_ick",
-	.addr		= am33xx_rtc_addrs,
-	.user		= OCP_USER_MPU,
-};
-
-static struct omap_hwmod_ocp_if *am33xx_adc_rtc_slaves[] = {
-	&am33xx_l4_wkup_rtc,
-};
-
-static struct omap_hwmod am33xx_rtc_hwmod = {
-	.name		= "rtc",
-	.class		= &am33xx_rtc_hwmod_class,
-	.clkdm_name	= "l4_rtc_clkdm",
-	.mpu_irqs	= am33xx_rtc_irqs,
-	.main_clk	= "rtc_fck",
-	.flags		= (HWMOD_INIT_NO_IDLE | HWMOD_INIT_NO_RESET), /* ??? */
-	.prcm		= {
-		.omap4	= {
-			.clkctrl_offs	= AM33XX_CM_RTC_RTC_CLKCTRL_OFFSET,
-			.modulemode	= MODULEMODE_SWCTRL,
-		},
-	},
-	.slaves		= am33xx_adc_rtc_slaves,
-	.slaves_cnt	= ARRAY_SIZE(am33xx_adc_rtc_slaves),
-};
-
 /* sha0 */
 static struct omap_hwmod_class_sysconfig am33xx_sha0_sysc = {
 	.rev_offs	= 0x100,
@@ -3673,8 +3613,6 @@ static __initdata struct omap_hwmod *am33xx_hwmods[] = {
 	&am33xx_ocmcram_hwmod,
 	/* ocpwp class */
 	&am33xx_ocpwp_hwmod,
-	/* rtc class */
-	&am33xx_rtc_hwmod,
 	/* sha0 class */
 	&am33xx_sha0_hwmod,
 	/* smartreflex class */

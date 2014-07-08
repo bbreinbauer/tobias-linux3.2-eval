@@ -1585,14 +1585,8 @@ static struct cpsw_slave_data am33xx_cpsw_slaves[] = {
 	{
 		.slave_reg_ofs  = 0x200,
 		.sliver_reg_ofs = 0xd80,
-		.phy_id		= "0:00",
+		.phy_id		= "1:01",
 		.dual_emac_reserved_vlan = CPSW_PORT_VLAN_SLAVE_0,
-	},
-	{
-		.slave_reg_ofs  = 0x300,
-		.sliver_reg_ofs = 0xdc0,
-		.phy_id		= "0:01",
-		.dual_emac_reserved_vlan = CPSW_PORT_VLAN_SLAVE_1,
 	},
 };
 
@@ -1600,7 +1594,7 @@ static struct cpsw_platform_data am33xx_cpsw_pdata = {
 	.ss_reg_ofs		= 0x1200,
 	.channels		= 8,
 	.cpdma_reg_ofs		= 0x800,
-	.slaves			= 2,
+	.slaves			= 1,
 	.slave_data		= am33xx_cpsw_slaves,
 	.ale_reg_ofs		= 0xd00,
 	.ale_entries		= 1024,
@@ -1673,21 +1667,6 @@ int am33xx_cpsw_init(enum am33xx_cpsw_mac_mode mode, unsigned char *phy_id0,
 			am33xx_cpsw_slaves[0].mac_addr[i] = am33xx_macid0[i];
 	}
 
-	mac_lo = omap_ctrl_readl(TI81XX_CONTROL_MAC_ID1_LO);
-	mac_hi = omap_ctrl_readl(TI81XX_CONTROL_MAC_ID1_HI);
-	am33xx_cpsw_slaves[1].mac_addr[0] = mac_hi & 0xFF;
-	am33xx_cpsw_slaves[1].mac_addr[1] = (mac_hi & 0xFF00) >> 8;
-	am33xx_cpsw_slaves[1].mac_addr[2] = (mac_hi & 0xFF0000) >> 16;
-	am33xx_cpsw_slaves[1].mac_addr[3] = (mac_hi & 0xFF000000) >> 24;
-	am33xx_cpsw_slaves[1].mac_addr[4] = mac_lo & 0xFF;
-	am33xx_cpsw_slaves[1].mac_addr[5] = (mac_lo & 0xFF00) >> 8;
-
-	/* Read MACID1 from eeprom if eFuse MACID is invalid */
-	if (!is_valid_ether_addr(am33xx_cpsw_slaves[1].mac_addr)) {
-		for (i = 0; i < ETH_ALEN; i++)
-			am33xx_cpsw_slaves[1].mac_addr[i] = am33xx_macid1[i];
-	}
-
 	switch (mode) {
 	case AM33XX_CPSW_MODE_MII:
 		gmii_sel = AM33XX_MII_MODE_EN;
@@ -1698,7 +1677,6 @@ int am33xx_cpsw_init(enum am33xx_cpsw_mac_mode mode, unsigned char *phy_id0,
 	case AM33XX_CPSW_MODE_RGMII:
 		gmii_sel = AM33XX_RGMII_MODE_EN;
 		am33xx_cpsw_slaves[0].phy_if = PHY_INTERFACE_MODE_RGMII;
-		am33xx_cpsw_slaves[1].phy_if = PHY_INTERFACE_MODE_RGMII;
 		break;
 	default:
 		return -EINVAL;
@@ -1708,9 +1686,6 @@ int am33xx_cpsw_init(enum am33xx_cpsw_mac_mode mode, unsigned char *phy_id0,
 
 	if (phy_id0 != NULL)
 		am33xx_cpsw_slaves[0].phy_id = phy_id0;
-
-	if (phy_id1 != NULL)
-		am33xx_cpsw_slaves[1].phy_id = phy_id1;
 
 	memcpy(am33xx_cpsw_pdata.mac_addr,
 			am33xx_cpsw_slaves[0].mac_addr, ETH_ALEN);
@@ -1759,15 +1734,6 @@ void am33xx_cpsw_init_generic(unsigned int phy_type, unsigned int gigen)
 	am33xx_cpsw_slaves[0].mac_addr[4] = mac_lo & 0xFF;
 	am33xx_cpsw_slaves[0].mac_addr[5] = (mac_lo & 0xFF00) >> 8;
 
-	mac_lo = omap_ctrl_readl(TI81XX_CONTROL_MAC_ID1_LO);
-	mac_hi = omap_ctrl_readl(TI81XX_CONTROL_MAC_ID1_HI);
-	am33xx_cpsw_slaves[1].mac_addr[0] = mac_hi & 0xFF;
-	am33xx_cpsw_slaves[1].mac_addr[1] = (mac_hi & 0xFF00) >> 8;
-	am33xx_cpsw_slaves[1].mac_addr[2] = (mac_hi & 0xFF0000) >> 16;
-	am33xx_cpsw_slaves[1].mac_addr[3] = (mac_hi & 0xFF000000) >> 24;
-	am33xx_cpsw_slaves[1].mac_addr[4] = mac_lo & 0xFF;
-	am33xx_cpsw_slaves[1].mac_addr[5] = (mac_lo & 0xFF00) >> 8;
-
 	__raw_writel(phy_type,
 			AM33XX_CTRL_REGADDR(MAC_MII_SEL));
 
@@ -1777,9 +1743,9 @@ void am33xx_cpsw_init_generic(unsigned int phy_type, unsigned int gigen)
 	oh = omap_hwmod_lookup("mdio");
         if (!oh) {
                 pr_err("could not find cpgmac0 hwmod data\n");
-                return -ENODEV;
+                return;
         }
-        pdev = omap_device_build("davinci_mdio", 0, oh, &am33xx_cpsw_mdiopdata,
+        pdev = omap_device_build("davinci_mdio", 1, oh, &am33xx_cpsw_mdiopdata,
                         sizeof(am33xx_cpsw_mdiopdata), NULL, 0, 0);
         if (IS_ERR(pdev))
                 pr_err("could not build omap_device for cpsw\n");
@@ -1787,7 +1753,7 @@ void am33xx_cpsw_init_generic(unsigned int phy_type, unsigned int gigen)
         oh = omap_hwmod_lookup("cpgmac0");
         if (!oh) {
                 pr_err("could not find cpgmac0 hwmod data\n");
-                return -ENODEV;
+                return;
         }
 
         pdev = omap_device_build("cpsw", -1, oh, &am33xx_cpsw_pdata,
@@ -1795,7 +1761,7 @@ void am33xx_cpsw_init_generic(unsigned int phy_type, unsigned int gigen)
         if (IS_ERR(pdev))
                 pr_err("could not build omap_device for cpsw\n");
 
-        return 0;
+        return;
 }
 
 

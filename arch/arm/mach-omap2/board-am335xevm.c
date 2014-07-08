@@ -260,66 +260,27 @@ static void __init am33xx_cpuidle_init(void)
 
 }
 
-static struct omap_rtc_pdata am335x_rtc_info = {
-	.pm_off		= false,
-	.wakeup_capable	= 0,
-};
-
-static void am335x_rtc_init()
+/* initialize system-relevant gpios (VTT, PHY, ...) */
+static void __init tobias_display_gpio_init(void)
 {
-	void __iomem *base;
-	struct clk *clk;
-	struct omap_hwmod *oh;
-	struct platform_device *pdev;
-	char *dev_name = "am33xx-rtc";
-
-	clk = clk_get(NULL, "rtc_fck");
-	if (IS_ERR(clk)) {
-		pr_err("rtc : Failed to get RTC clock\n");
-		return;
-	}
-
-	if (clk_enable(clk)) {
-		pr_err("rtc: Clock Enable Failed\n");
-		return;
-	}
-
-	base = ioremap(AM33XX_RTC_BASE, SZ_4K);
-
-	if (WARN_ON(!base))
-		return;
-
-	/* Unlock the rtc's registers */
-	writel(0x83e70b13, base + 0x6c);
-	writel(0x95a4f1e0, base + 0x70);
-
-	/*
-	 * Enable the 32K OSc
-	 * TODO: Need a better way to handle this
-	 * Since we want the clock to be running before mmc init
-	 * we need to do it before the rtc probe happens
-	 */
-	writel(0x48, base + 0x54);
-
-	iounmap(base);
-
-	am335x_rtc_info.pm_off = true;
-
-	clk_disable(clk);
-	clk_put(clk);
-
-	oh = omap_hwmod_lookup("rtc");
-	if (!oh) {
-		pr_err("could not look up %s\n", "rtc");
-		return;
-	}
-
-	pdev = omap_device_build(dev_name, -1, oh, &am335x_rtc_info,
-			sizeof(struct omap_rtc_pdata), NULL, 0, 0);
-	WARN(IS_ERR(pdev), "Can't build omap_device for %s:%s.\n",
-			dev_name, oh->name);
+    int err;
+    unsigned gpio_phy = GPIO_TO_PIN(1, 0);
+    unsigned gpio_vtt = GPIO_TO_PIN(1, 3);
+    err = gpio_request(gpio_phy, "nReset_PHY");
+    if (err == 0) {
+        gpio_direction_output(gpio_phy, 1);
+    }
+    else {
+        pr_err("Failed to set PHY nReset\n");
+    }
+    err = gpio_request(gpio_vtt, "nReset_PHY");
+    if (err == 0) {
+        gpio_direction_output(gpio_vtt, 1);
+    }
+    else {
+        pr_err("Failed to set VTT EN\n");
+    }
 }
-
 
 /* Called as part of board initialization, defined in MACHINE_START */
 static void __init am335x_evm_init(void)
@@ -327,9 +288,9 @@ static void __init am335x_evm_init(void)
     am33xx_cpuidle_init();
 	am33xx_mux_init(NULL);
     omap_serial_init();
-    am335x_rtc_init();
     clkout2_enable();
     omap_sdrc_init(NULL, NULL);
+    tobias_display_gpio_init();
 
    /* Beagle Bone has Micro-SD slot which doesn't have Write Protect pin */
     am335x_mmc[0].gpio_wp = -EINVAL;
