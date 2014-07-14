@@ -76,38 +76,39 @@
 unsigned int gigabit_enable = 1;
 
 /* eHRPWM is used to enable LCD backlight */
-static int ehrpwm_backlight_enable;
+static int ecap_backlight_enable;
 
 /* LCD backlight platform Data */
 #define AM335X_BACKLIGHT_MAX_BRIGHTNESS        100
 #define AM335X_BACKLIGHT_DEFAULT_BRIGHTNESS    50
 #define AM335X_PWM_PERIOD_NANO_SECONDS        (1000000 * 5)
 
-#define BBCAPE7LCD_PWM_DEVICE_ID   "ehrpwm.1:0"
+#define TOBIAS_LCD_PWM_DEVICE_ID    "ecap.1"
 
-static struct platform_pwm_backlight_data bbcape7lcd_backlight_data = {
-	.pwm_id         = BBCAPE7LCD_PWM_DEVICE_ID,
+static struct platform_pwm_backlight_data tobias_lcd_backlight_data = {
+	.pwm_id         = TOBIAS_LCD_PWM_DEVICE_ID,
 	.ch             = -1,
 	.max_brightness = AM335X_BACKLIGHT_MAX_BRIGHTNESS,
 	.dft_brightness = AM335X_BACKLIGHT_DEFAULT_BRIGHTNESS,
 	.pwm_period_ns  = AM335X_PWM_PERIOD_NANO_SECONDS,
 };
 
-/* Beaglebone 7" Cape is 800x480 resolution/16bpp  */
-static const struct display_panel bbcape7_panel = {
+/* Tobias LCD is 800x480 resolution/18bpp, we use 24bpp mode, but use only
+ * 18pins on LCD interface */
+static const struct display_panel tobias_panel = {
         WVGA,
-        16,
-        16,
+        24, //TODO: check this value, also in BB LCD spec
+        24,
         COLOR_ACTIVE,
 };
 
 /* Define display configuration */
-static struct lcd_ctrl_config bbcape7_cfg = {
-	&bbcape7_panel,
+static struct lcd_ctrl_config tobias_lcd_cfg = {
+	&tobias_panel,
 	.ac_bias		= 255,
 	.ac_bias_intrpt		= 0,
 	.dma_burst_sz		= 16,
-	.bpp			= 16,
+	.bpp			= 24,
 	.fdd			= 0x80,
 	.tft_alt_mode		= 0,
 	.stn_565_mode		= 0,
@@ -115,15 +116,15 @@ static struct lcd_ctrl_config bbcape7_cfg = {
 	.invert_line_clock	= 1,
 	.invert_frm_clock	= 1,
 	.sync_edge		= 0,
-	.sync_ctrl		= 1,
+	.sync_ctrl		= 0,
 	.raster_order		= 0,
 };
 
 /* ThreeFive LCD panel timings are defined in da8xx-fb display driver */
-struct da8xx_lcdc_platform_data bbcape7_pdata = {
-	.manu_name		= "ThreeFive",
-	.controller_data	= &bbcape7_cfg,
-	.type			= "TFC_S9700RTWV35TR_01B",
+struct da8xx_lcdc_platform_data tobias_lcd_pdata = {
+	.manu_name		= "U.R.T.",
+	.controller_data	= &tobias_lcd_cfg,
+	.type			= "UMSH-8596MD-7T",
 };
 
 /* TSc controller */
@@ -170,7 +171,7 @@ static int am33xx_evmid = BEAGLE_BONE_A3;
 */
 int am335x_evm_get_id(void)
 {
-        return am33xx_evmid;
+	return am33xx_evmid;
 }
 EXPORT_SYMBOL(am335x_evm_get_id);
 
@@ -182,13 +183,13 @@ struct pinmux_config {
 };
 
 /* Module pin mux for LCD backlight */
-static struct pinmux_config ehrpwm_pin_mux[] = {
-        {"gpmc_a2.ehrpwm1A", OMAP_MUX_MODE6 | AM33XX_PIN_OUTPUT},
+static struct pinmux_config backlight_pin_mux[] = {
+        {"spi0_cs1.ecap1_in_pwm1_out", OMAP_MUX_MODE2 | AM33XX_PIN_OUTPUT},
         {NULL, 0},
 };
 
-/* Module pin mux for Beagleboard 7" LCD cape */
-static struct pinmux_config bbcape7_pin_mux[] = {
+/* Module pin mux for Tobias LCD */
+static struct pinmux_config tobias_lcd_pin_mux[] = {
 	{"lcd_data0.lcd_data0",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
 		| AM33XX_PULL_DISA},
 	{"lcd_data1.lcd_data1",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
@@ -221,11 +222,15 @@ static struct pinmux_config bbcape7_pin_mux[] = {
 		| AM33XX_PULL_DISA},
 	{"lcd_data15.lcd_data15",	OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT
 		| AM33XX_PULL_DISA},
+	{"gpmc_ad15.lcd_data16",	OMAP_MUX_MODE1 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
+	{"gpmc_ad14.lcd_data17",	OMAP_MUX_MODE1 | AM33XX_PIN_OUTPUT
+		| AM33XX_PULL_DISA},
 	{"lcd_vsync.lcd_vsync",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
 	{"lcd_hsync.lcd_hsync",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
 	{"lcd_pclk.lcd_pclk",		OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
 	{"lcd_ac_bias_en.lcd_ac_bias_en", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
-	{"ecap0_in_pwm0_out.gpio0_7", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT}, // AVDD_EN
+	{"gpmc_ad2.gpio1_2", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT}, // Backlight Enable
 	{NULL, 0},
 };
 
@@ -249,7 +254,7 @@ static struct pinmux_config mmc0_pin_mux[] = {
         {"mmc0_clk.mmc0_clk",   OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
         {"mmc0_cmd.mmc0_cmd",   OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
         {"mcasp0_aclkr.mmc0_sdwp", OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},
-        {"spi0_cs1.mmc0_sdcd",  OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},
+        {"mcasp0_aclkx.mmc0_sdcd",  OMAP_MUX_MODE7 | AM33XX_PIN_INPUT_PULLUP},
         {NULL, 0},
 };
 
@@ -293,18 +298,18 @@ static struct pinmux_config clkout2_pin_mux[] = {
 };
 
 /* Enable ehrpwm for backlight control */
-static void enable_ehrpwm1(void)
+static void enable_ecap1(void)
 {
-	ehrpwm_backlight_enable = true;
-	setup_pin_mux(ehrpwm_pin_mux);
+	ecap_backlight_enable = true;
+	setup_pin_mux(backlight_pin_mux);
 }
 
 /* Setup pwm-backlight for bbtoys7lcd */
-static struct platform_device bbtoys7lcd_backlight = {
+static struct platform_device tobias_lcd_backlight = {
 	.name           = "pwm-backlight",
 	.id             = -1,
 	.dev            = {
-		.platform_data  = &bbcape7lcd_backlight_data,
+		.platform_data  = &tobias_lcd_backlight_data,
 	}
 };
 
@@ -321,16 +326,16 @@ static struct pwmss_platform_data  pwm_pdata[3] = {
 };
 
 /* Initialize and enable ehrpwm */
-static int __init ehrpwm1_init(void)
+static int __init ecap1_init(void)
 {
 	int status = 0;
-	if (ehrpwm_backlight_enable) {
-                am33xx_register_ehrpwm(1, &pwm_pdata[0]);
-		platform_device_register(&bbtoys7lcd_backlight);
+	if (ecap_backlight_enable) {
+                am33xx_register_ecap(1, &pwm_pdata[0]);
+		platform_device_register(&tobias_lcd_backlight);
 	}
 	return status;
 }
-late_initcall(ehrpwm1_init);
+late_initcall(ecap1_init);
 
 /* Configure display pll */
 static int __init conf_disp_pll(int rate)
@@ -351,22 +356,29 @@ out:
 }
 
 /* Initialize and register lcdc device */
-#define BEAGLEBONE_LCD_AVDD_EN GPIO_TO_PIN(0, 7)
+#define TOBIAS_LCD_BL_EN GPIO_TO_PIN(1, 2)
 
-static void bbcape7lcd_init(void)
+static void tobias_lcd_init(void)
 {
-	setup_pin_mux(bbcape7_pin_mux);
-	gpio_request(BEAGLEBONE_LCD_AVDD_EN, "BONE_LCD_AVDD_EN");
-	gpio_direction_output(BEAGLEBONE_LCD_AVDD_EN, 1);
-
+	int err;
+	setup_pin_mux(tobias_lcd_pin_mux);
+	/* enable LCD backlight */
+	err = gpio_request(TOBIAS_LCD_BL_EN, "TOBIAS_LCD_BL_EN");
+	if (err == 0) {
+		gpio_direction_output(TOBIAS_LCD_BL_EN, 1);
+	}
+	else {
+		pr_err("Failed to set LCD Backlight EN\n");
+	}
+	/* setup LCD */
 	if (conf_disp_pll(300000000)) {
 		pr_info("Failed to set pixclock to 300000000, not attempting to"
-				"register LCD cape\n");
+				"register LCD\n");
 		return;
 	}
 
-	if (am33xx_register_lcdc(&bbcape7_pdata))
-		pr_info("Failed to register Beagleboard LCD cape device\n");
+	if (am33xx_register_lcdc(&tobias_lcd_pdata))
+		pr_info("Failed to register Tobias LCD device\n");
 
 	return;
 }
@@ -431,11 +443,11 @@ void __iomem *am33xx_get_ram_base(void)
 
 void __iomem *am33xx_gpio0_base;
 
-/* am33xx_get_gpio0_base is needed in arch/arm/mach-omap2/sleep33xx.S */ 
+/* am33xx_get_gpio0_base is needed in arch/arm/mach-omap2/sleep33xx.S */
 void __iomem *am33xx_get_gpio0_base(void)
 {
         am33xx_gpio0_base = ioremap(AM33XX_GPIO0_BASE, SZ_4K);
- 
+
         return am33xx_gpio0_base;
 }
 
@@ -501,16 +513,16 @@ static void __init am335x_evm_init(void)
 {
 	am33xx_cpuidle_init();
 	am33xx_mux_init(NULL);
-    omap_serial_init();
-    clkout2_enable();
-    omap_sdrc_init(NULL, NULL);
-    tobias_display_gpio_init();
-	enable_ehrpwm1();
-	bbcape7lcd_init();
+	omap_serial_init();
+	clkout2_enable();
+	omap_sdrc_init(NULL, NULL);
+	tobias_display_gpio_init();
+	enable_ecap1();
+	tobias_lcd_init();
 	mfd_tscadc_init();
 
-   /* Beagle Bone has Micro-SD slot which doesn't have Write Protect pin */
-    am335x_mmc[0].gpio_wp = -EINVAL;
+	/* tobias has Micro-SD slot which doesn't have Write Protect pin */
+	am335x_mmc[0].gpio_wp = -EINVAL;
 	mmc0_init();
 
 	mii1_init();

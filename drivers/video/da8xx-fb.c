@@ -290,6 +290,20 @@ static struct da8xx_panel known_lcd_panels[] = {
 		.pxl_clk = 9000000,
 		.invert_pxl_clk = 0,
 	},
+	/* U.R.T UMSH-8596MD-7T */
+	[4] = {
+		.name = "UMSH-8596MD-7T",
+		.width = 800,
+		.height = 480,
+		.hfp = 127,
+		.hbp = 127,
+		.hsw = 0,
+		.vfp = 22,
+		.vbp = 23,
+		.vsw = 0,
+		.pxl_clk = 20000000,
+		.invert_pxl_clk = 1,
+	},
 };
 
 static inline bool is_raster_enabled(void)
