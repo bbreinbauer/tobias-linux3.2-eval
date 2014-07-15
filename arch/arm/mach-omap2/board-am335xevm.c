@@ -121,7 +121,7 @@ static struct lcd_ctrl_config tobias_lcd_cfg = {
 };
 
 /* ThreeFive LCD panel timings are defined in da8xx-fb display driver */
-struct da8xx_lcdc_platform_data tobias_lcd_pdata = {
+static struct da8xx_lcdc_platform_data tobias_lcd_pdata = {
 	.manu_name		= "U.R.T.",
 	.controller_data	= &tobias_lcd_cfg,
 	.type			= "UMSH-8596MD-7T",
@@ -154,6 +154,7 @@ static struct omap2_hsmmc_info am335x_mmc[] __initdata = {
         },
         {}      /* Terminator */
 };
+
 
 //***************** EVM ID is necessary in some supporting SW for AM335x - 
 //* To eliminate dependency, board port developers should search for 
@@ -276,6 +277,20 @@ static struct pinmux_config mii1_pin_mux[] = {
         {"mdio_data.mdio_data", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
         {"mdio_clk.mdio_clk", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT_PULLUP},
         {NULL, 0},
+};
+
+/* pinmux for usb0 drvvbus */
+static struct pinmux_config usb0_pin_mux[] = {
+    {"usb0_drvvbus.usb0_drvvbus",   OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+    {"gpmc_a9.gpio1_25",	    OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+    {NULL, 0},
+};
+
+/* pinmux for usb1 drvvbus */
+static struct pinmux_config usb1_pin_mux[] = {
+    {"usb1_drvvbus.usb1_drvvbus",    OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+    {"gpmc_a8.gpio1_24",	    OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+    {NULL, 0},
 };
 
 /*
@@ -408,6 +423,32 @@ static void mii1_init(void)
         return;
 }
 
+#define TOBIAS_USB0_EN GPIO_TO_PIN(1, 25)
+static void usb0_init(void)
+{
+	setup_pin_mux(usb0_pin_mux);
+	if (gpio_request(TOBIAS_USB0_EN, "TOBIAS_USB0_EN") == 0) {
+		gpio_direction_output(TOBIAS_USB0_EN, 1);
+	}
+	else {
+		pr_err("Failed to set USB0 EN\n");
+	}
+	return;
+}
+
+#define TOBIAS_USB1_EN GPIO_TO_PIN(1, 24)
+static void usb1_init(void)
+{
+	setup_pin_mux(usb1_pin_mux);
+	if (gpio_request(TOBIAS_USB1_EN, "TOBIAS_USB1_EN") == 0) {
+		gpio_direction_output(TOBIAS_USB1_EN, 1);
+	}
+	else {
+		pr_err("Failed to set USB1 EN\n");
+	}
+	return;
+}
+
 static void __init clkout2_enable(void)
 {
         struct clk *ck_32;
@@ -486,6 +527,19 @@ static void __init am33xx_cpuidle_init(void)
 
 }
 
+static struct omap_musb_board_data musb_board_data = {
+    .interface_type = MUSB_INTERFACE_ULPI,
+    /*
+     * mode[0:3] = USB0PORT's mode
+     * mode[4:7] = USB1PORT's mode
+     * AM335X beta EVM has USB0 in OTG mode and USB1 in host mode.
+     */
+    /*.mode           = (MUSB_HOST << 4) | MUSB_OTG,*/
+    .mode           = (MUSB_HOST << 4) | MUSB_HOST,
+    .power      = 500,
+    .instances  = 1,
+};
+
 /* initialize system-relevant gpios (VTT, PHY, ...) */
 static void __init tobias_display_gpio_init(void)
 {
@@ -527,6 +581,9 @@ static void __init am335x_evm_init(void)
 
 	mii1_init();
 	am33xx_cpsw_init_generic(MII_MODE_ENABLE,gigabit_enable);
+	usb0_init();
+	usb1_init();
+	usb_musb_init(&musb_board_data);
 }
 
 static void __init am335x_evm_map_io(void)
