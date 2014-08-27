@@ -282,15 +282,22 @@ static struct pinmux_config mii1_pin_mux[] = {
 /* pinmux for usb0 drvvbus */
 static struct pinmux_config usb0_pin_mux[] = {
     {"usb0_drvvbus.usb0_drvvbus",   OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
-    {"gpmc_a9.gpio1_25",	    OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+    {"gpmc_a9.gpio1_25",	    OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
     {NULL, 0},
 };
 
 /* pinmux for usb1 drvvbus */
 static struct pinmux_config usb1_pin_mux[] = {
     {"usb1_drvvbus.usb1_drvvbus",    OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
-    {"gpmc_a8.gpio1_24",	    OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+    {"gpmc_a8.gpio1_24",	    OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
     {NULL, 0},
+};
+
+/* pinmux for can1 */
+static struct pinmux_config d_can_gp_pin_mux[] = {
+	{"uart0_ctsn.d_can1_tx", OMAP_MUX_MODE2 | AM33XX_PULL_ENBL},
+	{"uart0_rtsn.d_can1_rx", OMAP_MUX_MODE2 | AM33XX_PIN_INPUT_PULLUP},
+	{NULL, 0},
 };
 
 /*
@@ -449,6 +456,12 @@ static void usb1_init(void)
 	return;
 }
 
+static void can1_init(void)
+{
+	setup_pin_mux(d_can_gp_pin_mux);
+	am33xx_d_can_init(1);
+}
+
 static void __init clkout2_enable(void)
 {
         struct clk *ck_32;
@@ -574,6 +587,7 @@ static void __init am335x_evm_init(void)
 	enable_ecap1();
 	tobias_lcd_init();
 	mfd_tscadc_init();
+	can1_init();
 
 	/* tobias has Micro-SD slot which doesn't have Write Protect pin */
 	am335x_mmc[0].gpio_wp = -EINVAL;
