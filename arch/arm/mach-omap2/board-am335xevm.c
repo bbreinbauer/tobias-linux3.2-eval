@@ -130,7 +130,7 @@ static struct da8xx_lcdc_platform_data tobias_lcd_pdata = {
 /* TSc controller */
 static struct tsc_data am335x_touchscreen_data  = {
         .wires  = 4,
-        .x_plate_resistance = 200,
+        .x_plate_resistance = 1100,
         .steps_to_configure = 5,
 };
 
@@ -300,6 +300,21 @@ static struct pinmux_config d_can_gp_pin_mux[] = {
 	{NULL, 0},
 };
 
+/* pinmux for uart1 */
+static struct pinmux_config uart1_pin_mux[] = {
+	{"uart1_txd.uart1_txd", OMAP_MUX_MODE0 | AM33XX_PIN_OUTPUT},
+	{"uart1_rxd.uart1_rxd", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
+	{"uart1_rtsn.gpio0_13", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
+	{NULL, 0},
+};
+
+/* pinmux for I2C-0 */
+static struct pinmux_config i2c0_pin_mux[] = {
+	{"i2c0_sda.i2c0_sda", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
+	{"i2c0_scl.i2c0_scl", OMAP_MUX_MODE0 | AM33XX_PIN_INPUT_PULLUP},
+	{NULL, 0},
+};
+
 /*
 * @pin_mux - single module pin-mux structure which defines pin-mux
 *                       details for all its pins.
@@ -462,6 +477,20 @@ static void can1_init(void)
 	am33xx_d_can_init(1);
 }
 
+
+static void i2c0_init(void)
+{
+	setup_pin_mux(i2c0_pin_mux);
+	omap_register_i2c_bus(1, 400, NULL /*am335x_i2c1_boardinfo*/,
+			0/*ARRAY_SIZE(am335x_i2c1_boardinfo)*/);
+	return;
+}
+
+static void uart1_init(void)
+{
+	setup_pin_mux(uart1_pin_mux);
+}
+
 static void __init clkout2_enable(void)
 {
         struct clk *ck_32;
@@ -588,6 +617,8 @@ static void __init am335x_evm_init(void)
 	tobias_lcd_init();
 	mfd_tscadc_init();
 	can1_init();
+	uart1_init();
+	i2c0_init();
 
 	/* tobias has Micro-SD slot which doesn't have Write Protect pin */
 	am335x_mmc[0].gpio_wp = -EINVAL;
